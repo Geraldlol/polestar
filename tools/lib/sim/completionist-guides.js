@@ -173,7 +173,9 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		const levels = entriesG.map((e) => e.level);
 		const lo = Math.max(1, Math.floor(Math.min(...levels)));
 		const hi = Math.max(lo, Math.min(60, Math.ceil(Math.max(...levels))));
-		guides.push({ gi, entries: entriesG, title, zone: zonesByCount[0], zones: zonesInOrder, lo, hi, id: `${base}/${String(gi + 1).padStart(2, '0')}-${slug(title)}`, seconds: entriesG[entriesG.length - 1].time - entriesG[0].time, start: entriesG[0].time });
+		// Numbered to sort in route order (the menu lists a chain by id): as many digits as the whole route needs.
+		const pad = Math.max(2, String(groups.length).length);
+		guides.push({ gi, entries: entriesG, title, zone: zonesByCount[0], zones: zonesInOrder, lo, hi, id: `${base}/${String(gi + 1).padStart(pad, '0')}-${slug(title)}`, seconds: entriesG[entriesG.length - 1].time - entriesG[0].time, start: entriesG[0].time });
 	}
 	// Each guide's time runs to the next guide's start.
 	for (let i = 0; i + 1 < guides.length; i++) guides[i].seconds = guides[i + 1].start - guides[i].start;
