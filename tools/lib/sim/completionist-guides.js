@@ -3,11 +3,14 @@
 // "Completionist", `sim export` of a completionist result): the simulator's
 // executed steps (export.js executedSteps) as `category Completionist` guides
 // that follow the guide conventions (docs/GUIDE_FORMAT.md):
-//   - one guide per stretch of the route: zone visits in order, a short visit
-//     (fewer than SHORT quest goals: a Stormwind stop, a lone turn-in) joins
-//     the guide before it; a guide is named after its zones with the most goals;
-//   - a step per place (consecutive goals within STEP_R yards), named after
-//     the map area there, with `zone` where the zone changes;
+//   - one guide per stretch of the route: a zone visit with BIG turn-ins or
+//     more starts a guide, a smaller one joins the guide before it unless
+//     that guide already runs LONG and the visit has 3+ turn-ins; a guide is
+//     named after its zones with the most goals;
+//   - a step per place and kind of stop (consecutive goals within STEP_R
+//     yards): quest givers and enders named after the NPC (or the hub, when a
+//     flight path or bind opens the step), objectives "<area>: <targets>",
+//     with `zone` where the zone changes; `hearth` as "Back to <inn>";
 //   - objectives as `kill` / `collect` / `interact` goals tied to the quest
 //     (the world's tasks record which objectives they hold), `complete` for
 //     events and escorts, `buy … nearest` for vendor items;
@@ -24,7 +27,9 @@
 
 const { K_ACCEPT, K_TASK, K_TURNIN, K_DUNGEON } = require('./run');
 
-const SHORT = 6; // quest goals: a visit with fewer joins the guide before it
+const SHORT = 6; // goals: a zone with fewer is left out of the guide's title
+const BIG = 12; // turn-ins: a visit with this many starts a guide
+const LONG = 3 * 3600; // seconds: a guide this long takes no more 3+ turn-in visits
 const STEP_R = 150; // yards: consecutive goals this close share a step
 const ELITE = new Set([1, 2, 3]);
 
@@ -70,11 +75,19 @@ function goalsFor(e, ctx) {
 	const opt = wq.elite ? ' optional' : '';
 	const elite = wq.elite ? eliteTargets(raw, data) : [];
 	const out = [];
-	const add = (text) => out.push({ text: `${text}${opt}`, optional: !!wq.elite, elite, q: e.q });
+	const add = (text, extra = {}) => out.push({ text: `${text}${opt}`, optional: !!wq.elite, elite, q: e.q, ...extra });
+	const name = (kind, id) => {
+		const rec = (kind === 'npc' ? data.npcs : kind === 'item' ? data.items : data.objects || {})[String(id)];
+		return rec && rec.name ? String(rec.name) : null;
+	};
 	if (e.kind === K_ACCEPT) {
 		// A quest started by an item: loot it first (the item's droppers).
 		const item = ((raw.start || {}).item || [])[0];
-		if (wq.accept && item) add(`collect ${item} x1`);
+		if (wq.accept && item) {
+			const from = /\(drop: (.+)\)$/.exec(wq.gName || '');
+			const tip = from && name('item', item) ? `${from[1]} drops the ${name('item', item)}: right-click it to start ${wq.title}.` : null;
+			add(`collect ${item} x1`, { target: name('item', item), tip });
+		}
 		add(`accept ${e.q}`);
 	} else if (e.kind === K_TURNIN) add(`turnin ${e.q}`);
 	else if (e.kind === K_TASK) {
@@ -100,12 +113,12 @@ function goalsFor(e, ctx) {
 				// character's side (work 'use'): the quest's own goal.
 				const fac = String((data.npcs[String(o.id)] || {}).faction || '').toUpperCase();
 				if (work[0] !== 'kill' || fac.includes(own)) whole = true;
-				else lines.push(`kill ${o.id} quest ${e.q}.${oi + 1}`);
+				else lines.push([`kill ${o.id} quest ${e.q}.${oi + 1}`, name('npc', o.id)]);
 			} else if (o.type === 'item') {
-				if (work[0] === 'buy') lines.push(`buy ${o.id} x${Number(o.count) > 0 ? o.count : 1} nearest`);
-				else if (work[0] === 'kill' || (work[0] === 'use' && work[1] !== 1)) lines.push(`collect ${o.id} quest ${e.q}.${oi + 1}`);
+				if (work[0] === 'buy') lines.push([`buy ${o.id} x${Number(o.count) > 0 ? o.count : 1} nearest`, name('item', o.id)]);
+				else if (work[0] === 'kill' || (work[0] === 'use' && work[1] !== 1)) lines.push([`collect ${o.id} quest ${e.q}.${oi + 1}`, name('item', o.id)]);
 				else whole = true; // handed over, or made on the spot
-			} else if (o.type === 'object') lines.push(`interact ${o.id} quest ${e.q}.${oi + 1}`);
+			} else if (o.type === 'object') lines.push([`interact ${o.id} quest ${e.q}.${oi + 1}`, name('object', o.id)]);
 			else whole = true;
 		});
 		// `complete` holds its step until every objective is done: only at the
@@ -113,8 +126,8 @@ function goalsFor(e, ctx) {
 		const seenTasks = (ctx.taskSeen.get(e.q) || 0) + 1;
 		ctx.taskSeen.set(e.q, seenTasks);
 		const last = seenTasks >= run.qTask1[qi] - run.qTask0[qi];
-		if (whole && last) add(`complete ${e.q}`);
-		else for (const l of lines) add(l);
+		if (whole && last) add(`complete ${e.q}`, { target: wq.title });
+		else for (const [l, target] of lines) add(l, { target });
 	}
 	return out;
 }
@@ -124,6 +137,9 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 	const ptOf = (e) => W[run.ptList[e.pt]];
 	const zoneOf = (e) => world.zones[ptOf(e)[4]] || `map ${ptOf(e)[4]}`;
 	const ctx = { run, data, faction: world.faction, taskSeen: new Map() };
+	// Quests the route takes but never hands in (the coverage report's
+	// "missed") get no goals: a guide never accepts what it cannot finish.
+	const finished = new Set(entries.filter((e) => e.type === 'step' && e.kind === K_TURNIN).map((e) => e.q));
 	// Zone visits (dungeon runs never occur: the family has none).
 	const visits = [];
 	for (const e of entries) {
@@ -133,12 +149,16 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		if (!last || (e.type === 'step' && last.zone !== z)) visits.push({ zone: z, entries: [e] });
 		else last.entries.push(e);
 	}
-	const questGoals = (v) => v.entries.filter((e) => e.type === 'step' && (e.kind === K_ACCEPT || e.kind === K_TURNIN)).length;
-	// Visits -> guides: a short visit joins the guide before it.
+	const turnins = (v) => v.entries.filter((e) => e.type === 'step' && e.kind === K_TURNIN).length;
+	// Visits -> guides: a visit with BIG turn-ins or more starts a guide; a
+	// smaller one joins the guide before it, unless that guide already runs
+	// LONG and this visit is more than a stop (3+ turn-ins): the route's many
+	// short cleanup trips become a few guides of a couple of hours each.
 	const groups = [];
 	for (const v of visits) {
 		const g = groups[groups.length - 1];
-		if (g && questGoals(v) < SHORT) g.visits.push(v);
+		const span = g ? v.entries[0].time - g.visits[0].entries[0].time : 0;
+		if (g && turnins(v) < BIG && !(span >= LONG && turnins(v) >= 3)) g.visits.push(v);
 		else groups.push({ visits: [v] });
 	}
 	const guides = [];
@@ -191,30 +211,49 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		};
 		const quests = new Set();
 		const eliteQuests = new Map();
+		const unfinished = new Set();
+		const placeOf = (pt) => place(run.ptList[pt]);
+		// Flight paths and binds are learned on the way into a place: their
+		// goals open the step at that place (the house style: `sethome` and
+		// `getfp` in the hub's step).
+		let pending = [];
 		for (const e of g.entries) {
 			if (e.type !== 'step') {
+				if (e.type === 'fp' || e.type === 'bind') {
+					const goal = { text: e.type === 'fp' ? `getfp "${e.name}"` : `sethome "${e.inn}"` };
+					if (cur && cur.talk && near(cur.pt, e.pt)) cur.goals.push(goal);
+					else pending.push({ goal, pt: e.pt });
+					continue;
+				}
 				cur = null;
-				if (e.type === 'fp') steps.push({ title: 'Flight path', goals: [{ text: `getfp "${e.name}"` }] });
-				else if (e.type === 'bind') steps.push({ title: `Hearthstone: ${e.inn}`, goals: [{ text: `sethome "${e.inn}"` }] });
-				else if (e.type === 'hearth') steps.push({ title: `Hearth to ${e.inn}`, goals: [{ text: `hearth "${e.inn}"` }] });
+				if (e.type === 'hearth') steps.push({ title: `Back to ${e.inn}`, goals: [{ text: `hearth "${e.inn}"` }] });
 				else if (e.type === 'grind') {
 					const to = Math.min(60, Math.floor(e.to + 1e-6));
-					if (to > Math.floor(e.from)) steps.push({ title: `Level ${to}`, goals: [{ text: `level ${to}${e.spot ? ` -- grind on ${e.spot.mob} (level ${e.spot.level})${e.spot.area ? ` at ${e.spot.area}` : ''}` : ''}` }] });
+					if (to > Math.floor(e.from)) steps.push({ title: e.spot ? `${e.spot.mob} (level ${to})` : `Level ${to}`, goals: [{ text: `level ${to}${e.spot ? ` -- grind on ${e.spot.mob} (level ${e.spot.level})${e.spot.area ? ` at ${e.spot.area}` : ''}` : ''}` }] });
 				}
+				continue;
+			}
+			if (!finished.has(e.q)) {
+				unfinished.add(e.q);
 				continue;
 			}
 			const z = zoneOf(e);
 			// A step per place and per kind of stop: quest givers and enders
-			// (named after the first NPC) or objectives (named after the area).
+			// (named after the NPC, or the hub when it also has a flight path
+			// or inn) or objectives (named after the area and the targets, below).
 			const talk = e.kind !== K_TASK;
 			if (!cur || !near(cur.pt, e.pt) || cur.talk !== talk) {
 				const wq = run.quests[run.qIndex.get(e.q)];
 				const npc = e.kind === K_ACCEPT ? (wq.accept ? null : wq.gName) : e.kind === K_TURNIN ? wq.eName : null;
-				const name = (talk && npc) || place(run.ptList[e.pt]) || z;
-				cur = { title: name, pt: e.pt, talk, zone: z !== zone ? z : null, goals: [] };
+				const here = pending.filter((p) => near(p.pt, e.pt));
+				const name = (talk && !here.length && npc) || placeOf(e.pt) || z;
+				cur = { title: name, area: placeOf(e.pt) || z, pt: e.pt, talk, zone: z !== zone ? z : null, goals: here.map((p) => p.goal) };
 				zone = z;
 				steps.push(cur);
 			}
+			// Learned elsewhere (on a flight's landing, say): a step of their own.
+			for (const p of pending) if (!cur.goals.includes(p.goal)) steps.splice(steps.length - 1, 0, { title: placeOf(p.pt) || z, goals: [p.goal] });
+			pending = [];
 			quests.add(e.q);
 			for (const goal of goalsFor(e, ctx)) {
 				if (cur.goals.some((x) => x.text === goal.text)) continue;
@@ -222,17 +261,39 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 				if (goal.elite && goal.elite.length) eliteQuests.set(goal.q, goal.elite);
 			}
 		}
+		for (const p of pending) steps.push({ title: placeOf(p.pt) || g.zone, goals: [p.goal] });
+		// Objective steps: "<Area>: <targets>" (the first two), e.g.
+		// "Northshire Valley: Kobold Vermin and Tough Wolf Meat".
+		for (const s of steps) {
+			if (s.talk !== false) continue;
+			const targets = [...new Set(s.goals.map((x) => x.target).filter(Boolean))];
+			if (targets.length) s.title = `${s.area}: ${targets.slice(0, 2).join(' and ')}${targets.length > 2 ? ' and more' : ''}`;
+		}
 		// A step of optional goals only is done at once: its goals join the
-		// next step (the one before at the end).
+		// nearest step in the same zone that holds a goal (the next ones
+		// first), else the next step, else the one before. A `zone` it set
+		// passes to the next step still standing.
+		const eff = [];
+		steps.forEach((x, k) => { eff[k] = x.zone || (k ? eff[k - 1] : g.zone); });
+		const holds = (x) => x.goals.some((y) => !y.optional);
 		for (let s = 0; s < steps.length; s++) {
 			const st = steps[s];
-			if (!st.goals.length || st.goals.some((x) => !x.optional)) continue;
-			const into = steps.slice(s + 1).find((x) => x.goals.length) || steps.slice(0, s).reverse().find((x) => x.goals.some((y) => !y.optional));
-			if (!into) continue;
-			const at = into === steps[s + 1] || steps.indexOf(into) > s ? 0 : into.goals.length;
-			into.goals.splice(at, 0, ...st.goals);
-			if (st.zone && !into.zone && steps.indexOf(into) > s) into.zone = st.zone;
+			if (!st.goals.length || holds(st)) continue;
+			const after = steps.map((x, k) => k).filter((k) => k > s && holds(steps[k]));
+			const before = steps.map((x, k) => k).filter((k) => k < s && holds(steps[k])).reverse();
+			// A move may not pass another goal of the same quests (an accept
+			// before its objectives, the objectives before the turn-in).
+			const qs = new Set(st.goals.map((x) => x.q).filter((q) => q != null));
+			const ok = (k) => !steps.slice(Math.min(s, k) + 1, Math.max(s, k)).some((x) => x.goals.some((y) => qs.has(y.q)));
+			const cand = [...after, ...before].filter(ok);
+			const k = cand.find((j) => eff[j] === eff[s]) ?? cand[0];
+			if (k == null) continue;
+			steps[k].goals.splice(k > s ? 0 : steps[k].goals.length, 0, ...st.goals);
 			st.goals = [];
+			if (st.zone) {
+				const next = steps.find((x, j) => j > s && x.goals.length);
+				if (next && !next.zone) next.zone = st.zone;
+			}
 		}
 		const kept = steps.filter((s) => s.goals.length);
 		// Profession quests given in this guide's zones: a note in the last step.
@@ -270,12 +331,23 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 			return out;
 		};
 		L.push('');
-		L.push(...wrap(`Route: ${meta.label}; guide ${i + 1} of ${guides.length}, levels ${g.lo} to ${g.hi}, ${quests.size} quests, ${(g.seconds / 3600).toFixed(1)} h under the model. Generated by \`polestar sim export\` from the completionist route (docs/SIMULATION.md "Completionist"); review in game before publishing.`));
+		// Areas in route order (consecutive repeats once), for the flow line.
+		const areas = [];
+		for (const s of kept) {
+			const a = s.area;
+			if (a && areas[areas.length - 1] !== a) areas.push(a);
+		}
+		const flow = areas.length > 14 ? [...areas.slice(0, 13), '…'] : areas;
+		L.push(...wrap(`Route: guide ${i + 1} of ${guides.length} of ${meta.label}: levels ${g.lo} to ${g.hi}, ${quests.size} quests, ${(g.seconds / 3600).toFixed(1)} h under the model. The order is the simulator's (\`sim run --objective completionist\`, then \`sim export\`; docs/SIMULATION.md §10): fix a step in the exporter or the data, not only here, so the next export keeps it.`));
 		L.push('#');
-		L.push(...wrap(`Flow: ${g.zones.join(' -> ')}.`));
+		L.push(...wrap(`Flow (${g.zones.join(', ')}): ${flow.join(' -> ')}.`));
 		if (elites.length) {
 			L.push('#');
 			L.push(...wrap(`Optional (elite: grouping up is advised): ${elites.join('; ')}.`));
+		}
+		if (unfinished.size) {
+			L.push('#');
+			L.push(...wrap(`Left out: ${[...unfinished].map((q) => `${(data.quests[String(q)] || {}).title || q} (${q})`).join(', ')}: the route takes them here but cannot finish them (the coverage report's missed quests).`));
 		}
 		if (prof.length) {
 			L.push('#');
@@ -286,8 +358,9 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		for (const s of kept) {
 			L.push('', `step ${s.title}`);
 			if (s.zone) L.push(`  zone ${s.zone}`);
-			const tips = [...new Set(s.goals.flatMap((x) => x.elite || []))];
-			if (tips.length) L.push(`  tip ${tips.map((n) => `${n} is elite: grouping up is advised.`).join(' ')}`);
+			const tips = [...new Set(s.goals.flatMap((x) => x.elite || []))].map((n) => `${n} is elite: grouping up is advised.`);
+			for (const x of s.goals) if (x.tip && !tips.includes(x.tip)) tips.push(x.tip);
+			if (tips.length) L.push(`  tip ${tips.join(' ')}`);
 			for (const goal of s.goals) L.push(`  ${goal.text}`);
 		}
 		return { id: g.id, file: `${g.id}.guide`, text: `${L.join('\n')}\n`, levels: [g.lo, g.hi], zones: g.zones, quests: quests.size, seconds: g.seconds };
