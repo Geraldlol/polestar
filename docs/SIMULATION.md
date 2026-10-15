@@ -303,15 +303,15 @@ Only the fitted parameter values are kept (data/sim/params.json).
 ## 6. CLI
 
 ```
-sim world   [--faction F] [--rebuild]               build/cache the world model (data/sim/world-<faction>.json)
+sim world   [--faction F] [--rebuild] [--objective completionist]   build/cache the world model (data/sim/world-<faction>[-completionist].json)
 sim calibrate [--fdj DIR]                            fit parameters to quest data and recordings
 sim run     --faction F [--race R] [--class C] [--paths N] [--workers W] [--seed S] [--dungeons]
-            [--jobs J] [--anneal A] [--max-paths M]
+            [--jobs J] [--anneal A] [--max-paths M] [--objective completionist [--grey-weight W] [--result FILE]]
 sim robust  --faction F [--race R] [--class C] [--draws K] [--top N]   robustness of the top routes
 sim compare --faction F [--race R] [--class C] [--guides DIR] [--pack DIR | DIR] [--to 10,20,30] [--with-optional]
             Polestar's routes vs the best found, same model
 sim bench   --faction F [--race R] [--class C]      bracket table: zones, levels, quests per 10 levels
-sim export  --result <file> --out <dir>             zone-by-zone skeleton guides + visits.json for authors
+sim export  --result <file> --out <dir> [--limit N]  zone-by-zone skeleton guides + visits.json for authors (a completionist result: Completionist guides)
 sim consensus --faction F [--dungeons] [--evals N]  one 12-60 route shared by the faction's starts (+ exports)
 ```
 
@@ -668,3 +668,69 @@ the fix belongs in `tools/lib/data/corrections.json` as well as in the
 guide: the simulator builds its world from the data, so only a corrected
 record keeps the next search, export and refresh from reproducing the
 mistake.
+## 10. Completionist routes
+
+A second objective: every quest a character can take, in the least time,
+instead of the fastest way to 60 (`--objective completionist`). Same world
+model, evaluator and search; what changes:
+
+- **World** (`sim world --objective completionist`,
+  data/sim/world-<faction>-completionist.json): the leveling world's builder
+  with the elite rule relaxed: elite kill objectives, items only elites or
+  mobs 5+ levels above drop, and quest-starting items from such mobs are
+  kept and marked `elite` (timed with `eliteTime`, XP ×2). Every other
+  exclusion stays (dungeon, raid, PvP, rare drops, reputation above Friendly,
+  repeatables, professions, seasonal events, placeholders, minimum level
+  60). Its hash includes the variant, so its results never replay on the
+  leveling world. Tasks in both worlds record the quest objective each work
+  item serves (`objs`, parallel to `work`), for exports.
+- **Eligible set** (`compileRun(…, { family: 'completionist' })`): every quest
+  of the world open to the race (masks, Zephras Isle for the Skyborne only),
+  without class quests (the Class guides cover them) and dungeon quests (the
+  Dungeons guides). A **two-way** exclusive pair (both list each other in
+  `excl`: 506/507 in the tests, 5601/5142 in the game) is a real choice: of
+  each group one quest is kept, the one most quests depend on (transitively),
+  then the higher reward, then the lower id; the others and the quests after
+  them are left out (`run.branches`, `run.blockedBy`). A one-way exclusion is
+  an order (526 before 324) and both stay. Packages holding only accepts
+  are kept (the leveling run drops them: they earn nothing).
+- **Evaluation**: nothing is ground after the last package; reaching 60 does
+  not end the route (`capped`: no more XP, quests still count). The route's
+  cost (`Evaluator.policyCost`) is the time to its last step, plus the
+  leveling policies (grinding ×`grindWeight`, `zoneChange` per zone move),
+  plus two completionist policies:
+  - `missWeight` (7200 s): each eligible quest left undone, far above any
+    quest's time, so the route never trades a quest for time;
+  - `greyWeight` (1): XP a quest loses by being turned in above its level
+    (the 80/60/40/20/10% steps, and all of it at 60) counts as the time to
+    earn it by grinding at the quest's level. A quest that goes grey costs
+    about what doing it in time would have earned; a late cleanup pass (a
+    package visited again, up to three times) is allowed and pays for the XP
+    its quests lost. `--grey-weight 0` is "fewest hours".
+- **Construction** scores a package by progress per hour of its policy
+  cost: quests turned in, plus a fifth per other step (accepts and
+  objectives lead to turn-ins elsewhere); every package up to the window's
+  top (level + 4) is a candidate (low ones are cleanup), and it stops when no
+  package makes progress. Annealing is unchanged.
+- **Coverage report**, beside the result (`<result>-coverage.json` / `.md`,
+  tools/lib/sim/completionist.js): per zone of the quest giver, eligible,
+  routed, elite (optional in the guides) and missed, and every quest of the
+  faction open to the race that is not eligible, with one reason: class
+  quest (Class guides), dungeon or raid quest (Dungeons), PvP, profession,
+  reputation, seasonal event, repeatable, rare drop, needs level 60,
+  placeholder, alternative of an exclusive choice, after an excluded quest,
+  Zephras Isle, or not placeable from the data. Missed quests say why
+  (accepted not finished, prerequisite not done, closed by an exclusive
+  quest, parent not in the log, never reached).
+- **Export** (`sim export --result <completionist result>`) writes
+  `category Completionist` guides
+  (tools/lib/sim/completionist-guides.js): one per stretch of the route
+  (a zone visit with fewer than 6 accepts and turn-ins joins the guide
+  before it), steps per place and per kind of stop (quest givers named after
+  the NPC, objectives after the map area), objectives as `kill` / `collect`
+  / `interact … quest Q.O` (the world's `objs`), `complete` for events at a
+  quest's last site, every goal of an elite quest `optional` with the tip
+  "<Target> is elite: grouping up is advised.", the profession quests of the
+  guide's zones as a note in its last step, and header comments (route,
+  flow, optional elites, profession quests, dungeon quests left to the
+  Dungeons guides). `--limit N` writes the first N.

@@ -1,0 +1,213 @@
+'use strict';
+// Completionist routes (docs/SIMULATION.md "Completionist"): the completionist
+// world, the eligible set and its exclusive choices, the evaluator's
+// completionist rules (no grind to 60, going on at 60, the grey charge, the
+// miss charge), construction and the coverage report, on the invented world
+// of tests/fixtures/sim.
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const { buildWorld } = require('../tools/lib/sim/world');
+const { compileRun, makeTables, K_TURNIN } = require('../tools/lib/sim/run');
+const { Evaluator, SHARE } = require('../tools/lib/sim/evaluate');
+const { construct } = require('../tools/lib/sim/search');
+const { Rng } = require('../tools/lib/sim/rng');
+const { effective, means } = require('../tools/lib/sim/params');
+const { coverage, coverageMarkdown } = require('../tools/lib/sim/completionist');
+const { completionistGuides } = require('../tools/lib/sim/completionist-guides');
+const { executedSteps } = require('../tools/lib/sim/export');
+const { LEVEL_XP } = require('../tools/lib/game/xp');
+const syn = require('./fixtures/sim/synthetic');
+
+const { VALE } = syn;
+
+// The base world plus an elite quest, a quest whose item only an elite
+// drops, a quest after it, a profession quest and a one-way exclusion.
+function data() {
+	const d = syn.makeData();
+	const base = d.quests[501];
+	const q = (id, title, x) => ({ ...base, id, title, objectives: [], ...x });
+	Object.assign(d.npcs, {
+		20: { id: 20, name: 'Elite Brute', level: 5, rank: 1, faction: null, spawns: { [VALE]: { f: 'e', pts: [[30, 70], [31, 70]] } } },
+	});
+	Object.assign(d.items, {
+		200: { id: 200, name: 'Brute Tooth', drops: { npc: { 20: 80 }, object: {} }, vendors: [] },
+	});
+	Object.assign(d.quests, {
+		904: q(904, 'Brute Force', { level: 5, objectives: [{ type: 'kill', id: 10, count: 2 }, { type: 'kill', id: 20, count: 1 }] }),
+		905: q(905, 'Brute Teeth', { level: 5, objectives: [{ type: 'item', id: 200, count: 2 }] }),
+		906: q(906, 'After the Teeth', { level: 5, pre: [905], objectives: [{ type: 'kill', id: 10, count: 2 }] }),
+		907: q(907, 'Tailoring Order', { skill: { id: 197, value: 50 }, objectives: [{ type: 'kill', id: 10, count: 2 }] }),
+		961: q(961, 'One-Way', { excl: [962], objectives: [{ type: 'kill', id: 10, count: 2 }] }),
+		962: q(962, 'Main Chain', { objectives: [{ type: 'kill', id: 10, count: 2 }] }),
+	});
+	return d;
+}
+
+function build(variant) {
+	const w = buildWorld(data(), { faction: 'Horde', bandWidth: 5, extraStarts: syn.START, variant });
+	w.questXp = syn.questXpRows();
+	return w;
+}
+
+function setup(over = {}) {
+	const w = build('completionist');
+	const run = compileRun(w, { race: 'Orc', cls: null, family: 'completionist' });
+	const p = { ...means(effective({ calibrated: {} })), ...over };
+	return { w, run, p, ev: new Evaluator(run, makeTables(run, p)) };
+}
+
+test('the completionist world keeps elite quests (marked elite) and every other exclusion; the leveling world is unchanged', () => {
+	const solo = build();
+	const comp = build('completionist');
+	const ids = (w) => w.quests.map((q) => q.id);
+	for (const id of [904, 905]) assert.ok(!ids(solo).includes(id), `${id} not in the leveling world`);
+	// 906 is there, but unreachable at run time (after the excluded 905).
+	assert.ok(!compileRun(solo, { race: 'Orc' }).qIndex.has(906));
+	assert.equal(solo.excluded.find((e) => e.id === 904).category, 'elite');
+	for (const id of [904, 905, 906]) assert.ok(ids(comp).includes(id), `${id} in the completionist world`);
+	assert.equal(comp.quests.find((q) => q.id === 904).elite, true);
+	assert.equal(comp.quests.find((q) => q.id === 905).elite, true);
+	assert.equal(comp.quests.find((q) => q.id === 906).elite, false);
+	// Professions stay out of both (crafting is not modelled).
+	assert.equal(comp.excluded.find((e) => e.id === 907).reason, 'profession');
+	assert.equal(solo.variant, 'solo');
+	assert.equal(comp.variant, 'completionist');
+	// Tasks name the objectives they hold (raw.objectives indices).
+	const brute = comp.quests.find((q) => q.id === 904);
+	assert.deepEqual(brute.tasks.flatMap((t) => t.objs).sort(), [0, 1]);
+});
+
+test('eligible set: one quest of a two-way exclusive choice (most dependents, then reward, then id), one-way exclusions stay; class quests left to the Class guides', () => {
+	const { run } = setup();
+	// 506/507 list each other: a real choice; equal in every way, so the lower id.
+	assert.deepEqual(run.branches, [{ kept: 506, dropped: [507] }]);
+	assert.ok(run.qIndex.has(506));
+	assert.ok(!run.qIndex.has(507));
+	// 961 lists 962 only: an order (961 first), both eligible.
+	assert.ok(run.qIndex.has(961) && run.qIndex.has(962));
+	assert.ok(!run.qIndex.has(508), 'the Mage quest is the Class guides\'');
+	assert.ok(run.qIndex.has(904) && run.qIndex.has(906));
+	assert.throws(() => compileRun(build(), { race: 'Orc', family: 'completionist' }), /completionist world/);
+});
+
+test('exclusive choice: the branch more quests depend on is kept', () => {
+	const d = data();
+	d.quests[970] = { ...d.quests[501], id: 970, title: 'After Choice Two', pre: [507], objectives: [{ type: 'kill', id: 10, count: 2 }] };
+	const w = buildWorld(d, { faction: 'Horde', bandWidth: 5, extraStarts: syn.START, variant: 'completionist' });
+	w.questXp = syn.questXpRows();
+	const run = compileRun(w, { race: 'Orc', family: 'completionist' });
+	assert.deepEqual(run.branches, [{ kept: 507, dropped: [506] }]);
+});
+
+test('completionist evaluation: no grind to 60, the cost is time plus the grey and miss charges', () => {
+	const { run, ev, p } = setup();
+	const r = ev.evaluate([]);
+	assert.equal(r.grindSeconds, 0, 'nothing ground after the last package');
+	assert.equal(r.missed, run.Q);
+	assert.equal(ev.cost([]), p.missWeight * run.Q);
+	// A quest turned in 10+ levels above its level loses 90% of its XP: that
+	// XP's grinding time at the quest's level is charged greyWeight times.
+	ev.reset();
+	ev.level = 15;
+	const qi = run.qIndex.get(501);
+	ev.active[qi] = 1;
+	for (let t = run.qTask0[qi]; t < run.qTask1[qi]; t++) ev.taskDone[t] = 1;
+	ev.step(K_TURNIN, qi, -1, run.qEnder[qi]);
+	assert.equal(ev.done[qi], 1);
+	const full = ev.t.qFull[qi];
+	assert.equal(SHARE[15 - 2], 0.1);
+	assert.ok(Math.abs(ev.xpLost - full * 0.9) < 1e-6);
+	assert.ok(Math.abs(ev.greySec - (full * 0.9) / ev.t.grindRate[2]) < 1e-6);
+	assert.equal(ev.greyQuests, 1);
+	const before = ev.policyCost();
+	ev.p = { ...ev.p, greyWeight: 2 };
+	assert.ok(Math.abs(ev.policyCost() - before - ev.greySec) < 1e-6);
+});
+
+test('completionist evaluation goes on at 60: no more XP, quests still count, all their XP charged', () => {
+	const { run, ev } = setup();
+	ev.reset();
+	ev.level = 59;
+	ev.xp = LEVEL_XP[59] - 1;
+	ev.gain(10);
+	assert.equal(ev.level, 60);
+	assert.equal(ev.capped, true);
+	assert.equal(ev.finished, false);
+	ev.gain(5000);
+	assert.equal(ev.xp, 0);
+	const qi = run.qIndex.get(502);
+	ev.active[qi] = 1;
+	for (let t = run.qTask0[qi]; t < run.qTask1[qi]; t++) ev.taskDone[t] = 1;
+	ev.step(K_TURNIN, qi, -1, run.qEnder[qi]);
+	assert.equal(ev.questsDone, 1);
+	assert.ok(Math.abs(ev.xpLost - ev.t.qFull[qi]) < 1e-6);
+});
+
+test('construction completes every eligible quest of a small world, elites included', () => {
+	const { run, ev } = setup();
+	const r = construct(ev, new Rng(7), { tau: 0.1 });
+	const res = ev.evaluate(r.route);
+	assert.equal(res.feasible, true);
+	assert.equal(res.missed, 0, `missed: ${run.quests.filter((q, i) => !ev.done[i]).map((q) => q.id).join(', ')}`);
+	assert.equal(res.questsDone, run.Q);
+	assert.equal(r.seconds, ev.cost(r.route));
+});
+
+test('coverage: eligible vs routed per zone, every other quest of the race with one reason', () => {
+	const { w, run, ev } = setup();
+	const { route } = construct(ev, new Rng(7), { tau: 0.1 });
+	const d = data();
+	const cov = coverage({ world: w, run, ev, route, data: d });
+	assert.equal(cov.summary.eligible, run.Q);
+	assert.equal(cov.summary.routed, run.Q);
+	assert.equal(cov.summary.missed, 0);
+	assert.equal(cov.summary.optional, 2); // 904, 905
+	const reason = (id) => (cov.out.find((o) => o.id === id) || {}).reason;
+	assert.equal(reason(507), 'alternative');
+	assert.equal(reason(508), 'class');
+	assert.equal(reason(907), 'profession');
+	assert.equal(reason(601), 'dungeon');
+	const vale = cov.zones.find((z) => z.zone === 'Testvale');
+	assert.ok(vale.eligible > 0 && vale.routed === vale.eligible);
+	const md = coverageMarkdown(cov);
+	assert.match(md, /\| Testvale \| \d+ \| \d+ \| 2 \| 0 \|/);
+	assert.match(md, /## Exclusive choices/);
+	assert.match(md, /\| 506 \| 507 \|/);
+});
+
+test('export: Completionist guides follow the guide conventions (category, folder, objective goals, optional elites with the tip, chained)', () => {
+	const { w, run, ev } = setup();
+	const { route } = construct(ev, new Rng(7), { tau: 0.1 });
+	const d = data();
+	const entries = executedSteps(ev, run, route);
+	const cov = coverage({ world: w, run, ev, route, data: d });
+	const guides = completionistGuides({ world: w, run, data: d, entries, meta: { faction: 'Horde', race: 'Orc', label: 'test route' }, place: () => null, coverage: cov, base: 'forever/completionist/horde/orc' });
+	assert.ok(guides.length >= 1);
+	const text = guides.map((g) => g.text).join('\n');
+	const g0 = guides[0].text;
+	assert.match(g0, /^guide forever\/completionist\/horde\/orc\/01-testvale(-farfield)?\n/);
+	assert.match(g0, /\ncategory Completionist\n/);
+	assert.match(g0, /\nfolder Completionist · Orc 1-20\n/);
+	if (guides.length > 1) assert.match(g0, new RegExp(`\\nnext ${guides[1].id}\\n`));
+	// Objectives as goals tied to the quest; the elite quest's goals optional, with the tip.
+	assert.match(text, /\n {2}kill 10 quest 501\.1\n/);
+	assert.match(text, /\n {2}collect 100 quest 502\.1\n/);
+	assert.match(text, /\n {2}accept 904 optional\n/);
+	assert.match(text, /\n {2}kill 20 quest 904\.2 optional\n/);
+	assert.match(text, /\n {2}kill 10 quest 904\.1 optional\n/);
+	assert.match(text, /\n {2}turnin 904 optional\n/);
+	assert.match(text, /\n {2}tip Elite Brute is elite: grouping up is advised\.\n/);
+	assert.match(text, /# Optional \(elite: grouping up is advised\): Brute Force \(904; Elite Brute\)/);
+	// The profession quest is a note, not a goal.
+	assert.match(text, /note "Profession quests here, for players with the skill: Tailoring Order \(a profession\)\."/);
+	assert.doesNotMatch(text, /accept 907/);
+	// Every step holds a goal that is not optional (a note never holds one).
+	for (const g of guides) {
+		for (const step of g.text.split('\nstep ').slice(1)) {
+			const goals = step.split('\n').slice(1).map((l) => l.trim()).filter((l) => l && !/^(tip|zone|note) /.test(l));
+			assert.ok(goals.some((l) => !/ optional$/.test(l)), `a step of optional goals only:\n${step}`);
+		}
+	}
+});

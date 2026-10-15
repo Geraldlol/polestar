@@ -36,6 +36,14 @@
 //     followed as a plan, under-levelled). Off in search, where it would
 //     turn the gate into "grind anywhere".
 // After the last package the character grinds to 60 at the best site for its level.
+//
+// Completionist runs (run.completionist, docs/SIMULATION.md "Completionist"):
+// reaching 60 does not end the route (`capped`: no more XP, quests still
+// count), nothing is ground after the last package, and the route's cost is
+// the time to its last step plus the policies: grinding and zone changes as
+// above, `greyWeight` × the time to grind back the XP quests lost by being
+// turned in above their level (`greySec`, all of it at 60), and `missWeight`
+// per quest of the run (the eligible set) left undone.
 
 const { Travel } = require('./travel');
 const { MOBL, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY } = require('./run');
@@ -134,6 +142,10 @@ class Evaluator {
 		this.catchUpSec = 0;
 		this.zoneChanges = 0;
 		this.awayPending = false;
+		this.capped = false;
+		this.xpLost = 0;
+		this.greySec = 0;
+		this.greyQuests = 0;
 	}
 
 	snapshot() {
@@ -144,7 +156,7 @@ class Evaluator {
 			infeasible: this.infeasible, hearths: this.hearths, flights: this.flights, levelFrom: this.level,
 			xpDungeon: this.xpDungeon, dungeonSec: this.dungeonSec, dungeonsRun: this.dungeonsRun,
 			homeLeft: this.homeLeft, unreachable: this.unreachable, riskCrossings: this.riskCrossings, steps: this.steps, catchUpSec: this.catchUpSec,
-			zoneChanges: this.zoneChanges,
+			zoneChanges: this.zoneChanges, capped: this.capped, xpLost: this.xpLost, greySec: this.greySec, greyQuests: this.greyQuests,
 		};
 	}
 
@@ -182,6 +194,10 @@ class Evaluator {
 		this.steps = s.steps;
 		this.catchUpSec = s.catchUpSec;
 		this.zoneChanges = s.zoneChanges;
+		this.capped = s.capped;
+		this.xpLost = s.xpLost;
+		this.greySec = s.greySec;
+		this.greyQuests = s.greyQuests;
 	}
 
 	// Flip a 0 flag to 1, journaled when trial moves are active.
@@ -226,7 +242,9 @@ class Evaluator {
 		if (this.level >= 60) {
 			this.level = 60;
 			this.xp = 0;
-			this.finished = true;
+			// A completionist route goes on at 60 for the quests left.
+			if (this.run.completionist) this.capped = true;
+			else this.finished = true;
 			return;
 		}
 		this.time += this.p.levelOverhead;
@@ -237,8 +255,9 @@ class Evaluator {
 	}
 
 	gain(amount) {
+		if (this.capped) return;
 		this.xp += amount;
-		while (!this.finished && this.xp >= LEVEL_XP[this.level]) this.levelUp();
+		while (!this.finished && !this.capped && this.xp >= LEVEL_XP[this.level]) this.levelUp();
 	}
 
 	// Grind until `level` (+ xpInto) at the best site for the current level.
@@ -328,7 +347,7 @@ class Evaluator {
 				const walk = (r.wSpacing[w] * p.spacing) / (p.runSpeed * (this.mounted ? 1 : 1));
 				while (n > 0 && !this.finished) {
 					const L = this.level;
-					const xpPer = t.killX[L * MOBL + M] * (elite ? 2 : 1);
+					const xpPer = this.capped ? 0 : t.killX[L * MOBL + M] * (elite ? 2 : 1);
 					const tPer = t.killT[L * MOBL + M] * (elite ? p.eliteTime : 1) + walk;
 					if (xpPer <= 0) {
 						this.time += n * tPer;
@@ -420,7 +439,14 @@ class Evaluator {
 			}
 			this.time += this.p.talkSec;
 			const d = this.level - r.qLevel[q];
-			const xp = this.t.qFull[q] * SHARE[d < 0 ? 0 : d > 63 ? 63 : d];
+			const share = this.capped ? 0 : SHARE[d < 0 ? 0 : d > 63 ? 63 : d];
+			const xp = this.t.qFull[q] * share;
+			if (share < 1 && this.run.completionist) {
+				const lost = this.t.qFull[q] - xp;
+				this.xpLost += lost;
+				this.greySec += lost / this.t.grindRate[Math.max(1, Math.min(60, r.qLevel[q]))];
+				this.greyQuests++;
+			}
 			this.set0Active(q);
 			this.set1(J_DONE, this.done, q);
 			this.questsDone++;
@@ -583,14 +609,14 @@ class Evaluator {
 	}
 
 	finish() {
-		if (!this.finished) this.grindTo(60);
+		if (!this.finished && !this.run.completionist) this.grindTo(60);
 	}
 
 	result(extra = {}) {
 		const timeTo = {};
 		for (let l = 10; l <= 60; l += 10) timeTo[l] = this.levelTimes[l];
 		return {
-			seconds: this.levelTimes[60] || this.time,
+			seconds: this.run.completionist ? this.time : this.levelTimes[60] || this.time,
 			feasible: !this.infeasible,
 			timeTo,
 			levelTimes: Array.from(this.levelTimes),
@@ -607,6 +633,7 @@ class Evaluator {
 			riskCrossings: this.riskCrossings,
 			catchUpSeconds: this.catchUpSec,
 			zoneChanges: this.zoneChanges,
+			...(this.run.completionist ? { missed: this.run.Q - this.questsDone, xpLost: Math.round(this.xpLost), greySeconds: this.greySec, greyQuests: this.greyQuests } : {}),
 			...extra,
 		};
 	}
@@ -633,8 +660,8 @@ class Evaluator {
 	// policies: routes level by quests, take a hub's quests and do them in one
 	// go, and switch zones when it is clearly worth it; with neither, the
 	// search ground or flew across continents wherever that saved a minute).
-	// Reported times (evaluate) stay real. The number of packages used is
-	// left in this.lastUsed.
+	// Reported times (evaluate) stay real. Completionist runs: see the top
+	// (policyCost). The number of packages used is left in this.lastUsed.
 	cost(route) {
 		this.reset();
 		let used = 0;
@@ -647,7 +674,15 @@ class Evaluator {
 		}
 		this.finish();
 		this.lastUsed = used;
-		return (this.levelTimes[60] || this.time) + ((this.p.grindWeight || 1) - 1) * this.grindSec + (this.p.zoneChange || 0) * this.zoneChanges;
+		return this.policyCost();
+	}
+
+	// The cost of the state reached (after finish()).
+	policyCost() {
+		const p = this.p;
+		const policy = ((p.grindWeight || 1) - 1) * this.grindSec + (p.zoneChange || 0) * this.zoneChanges;
+		if (this.run.completionist) return this.time + policy + (p.greyWeight || 0) * this.greySec + (p.missWeight || 0) * (this.run.Q - this.questsDone);
+		return (this.levelTimes[60] || this.time) + policy;
 	}
 
 	packageRecord(p, s) {
@@ -656,7 +691,7 @@ class Evaluator {
 		return {
 			pkg: p, key: pk.key, zone: pk.zoneName,
 			arrive: s.time, leave: this.time,
-			levelIn: s.level + s.xp / LEVEL_XP[s.level], levelOut: this.level + (this.level < 60 ? this.xp / LEVEL_XP[this.level] : 0),
+			levelIn: s.level + (s.level < 60 ? s.xp / LEVEL_XP[s.level] : 0), levelOut: this.level + (this.level < 60 ? this.xp / LEVEL_XP[this.level] : 0),
 			xpQuest: this.xpQuest - s.xpQuest, xpKill: this.xpKill - s.xpKill, grind: this.grindSec - s.grindSec,
 			travel: this.travelSec - s.travelSec, quests: this.questsDone - s.questsDone, dungeon: this.dungeonSec - s.dungeonSec,
 			catchUp: this.catchUpSec - s.catchUpSec, risk: this.riskCrossings - s.riskCrossings,

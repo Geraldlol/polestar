@@ -26,8 +26,16 @@ function cumXp(ev) {
 // Construct one route. Returns { route, seconds, trials }. While home
 // packages (the starting area) are left, only they are candidates
 // (evaluate.js route rules).
+//
+// Completionist runs score a package by progress per hour instead of XP per
+// hour: quests turned in, plus a fifth for every other step done (accepts
+// and objectives lead to turn-ins elsewhere), over the package's time with
+// its policy costs (grey XP, grinding, zone changes: Evaluator.policyCost).
+// Every package up to the level window's top is a candidate (low ones are
+// cleanup), and construction stops when no package makes progress.
 function construct(ev, rng, { tau = 0.1, window = [-9, 4] } = {}) {
 	const run = ev.run;
+	const comp = run.completionist;
 	ev.reset();
 	ev.journaling = true;
 	const route = [];
@@ -38,17 +46,20 @@ function construct(ev, rng, { tau = 0.1, window = [-9, 4] } = {}) {
 		const L = ev.level;
 		let n = 0;
 		let max = 0;
+		const c0 = comp ? ev.policyCost() : 0;
 		for (let p = 0; p < run.P; p++) {
 			if (!ev.canVisit(p)) continue;
 			const pk = run.packages[p];
 			if (ev.homeLeft > 0) {
 				if (!run.pkgHome[p]) continue;
-			} else if (pk.levels[1] < L + window[0] || pk.levels[0] > L + window[1]) continue;
+			} else if ((!comp && pk.levels[1] < L + window[0]) || pk.levels[0] > L + window[1]) continue;
 			const s = ev.snapshot();
 			const x0 = cumXp(ev);
 			ev.runPackage(p);
-			const dx = cumXp(ev) - x0 + (ev.finished ? 1e9 : 0);
-			const dt = ev.time - s.time;
+			// Progress (comp: quests + steps / 5; else XP) and its time.
+			const dx = comp ? ev.questsDone - s.questsDone + (ev.steps - s.steps) / 5 : cumXp(ev) - x0 + (ev.finished ? 1e9 : 0);
+			// policyCost counts each undone quest at missWeight: done ones lower it.
+			const dt = comp ? ev.policyCost() - c0 + (ev.questsDone - s.questsDone) * (ev.p.missWeight || 0) : ev.time - s.time;
 			ev.restore(s);
 			trials++;
 			// Home packages must all be run, even ones that give nothing.
@@ -59,7 +70,8 @@ function construct(ev, rng, { tau = 0.1, window = [-9, 4] } = {}) {
 			if (sc > max) max = sc;
 		}
 		// Nothing worth doing (below half the grind rate): grind out the rest.
-		if (!n || (max < 0.5 * ev.t.grindRate[L] * 3600 && ev.homeLeft === 0)) break;
+		// Completionist: nothing left that makes progress.
+		if (!n || (!comp && max < 0.5 * ev.t.grindRate[L] * 3600 && ev.homeLeft === 0)) break;
 		let tot = 0;
 		for (let i = 0; i < n; i++) {
 			scores[i] = Math.exp((scores[i] - max) / (tau * max));

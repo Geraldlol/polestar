@@ -86,13 +86,17 @@ function onIsle(world, q) {
 // races' starting islands); see docs/SIMULATION.md "Starts".
 const HOME_LEVEL = 10;
 
-// family: 'solo' (no dungeons) or 'dungeons' (dungeon packages and their quests allowed).
+// family: 'solo' (no dungeons), 'dungeons' (dungeon packages and their
+// quests allowed) or 'completionist' (every quest open to the character, on
+// the completionist world: docs/SIMULATION.md "Completionist"; no dungeons).
 function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } = {}) {
 	const faction = world.faction;
 	const rbit = raceBit(race, raceBits, faction);
 	const start = world.starts[race];
 	if (!start) throw new Error(`no ${faction} start for race ${race} (known: ${Object.keys(world.starts).join(', ')})`);
 	const withDungeons = family === 'dungeons';
+	const completionist = family === 'completionist';
+	if (completionist && world.variant !== 'completionist') throw new Error('the completionist family runs on the completionist world (sim.loadWorld({ variant: "completionist" }))');
 	const skyborne = race === 'Skyborne';
 
 	// ---- quests open to this character ----
@@ -101,6 +105,47 @@ function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } 
 	const isOpen = (q) => questOpen(q, faction, rbit, cls) && (skyborne || !onIsle(world, q));
 	let open = new Map();
 	for (const q of world.quests) if (isOpen(q) && (withDungeons || q.dungeon === undefined)) open.set(q.id, q);
+	// Completionist: quests that exclude each other both ways are a real
+	// choice (a one-way `excl` is only an order: 526 before 324). Of each
+	// such group one is kept: most quests depending on it (transitively),
+	// then the higher reward (recorded XP, else the QuestXP estimate), then
+	// the lower id; the others are left out as its alternatives (`branches`)
+	// and the quests after them go with them (blocked below).
+	const branches = [];
+	if (completionist) {
+		const followers = new Map();
+		for (const q of open.values()) {
+			for (const p of q.pre.concat(q.preAll || [])) {
+				if (!followers.has(p)) followers.set(p, []);
+				followers.get(p).push(q.id);
+			}
+		}
+		const depCount = (id) => {
+			const seen = new Set();
+			const stack = [id];
+			while (stack.length) for (const f of followers.get(stack.pop()) || []) if (!seen.has(f)) {
+				seen.add(f);
+				stack.push(f);
+			}
+			return seen.size;
+		};
+		const rows = world.questXp || [];
+		const reward = (q) => q.xp || ((rows[Math.max(1, Math.min(rows.length - 1, q.level))] || [])[q.tier] || 0);
+		const sym = (a, b) => (a.excl || []).includes(b.id) && (b.excl || []).includes(a.id);
+		const partners = (q) => (q.excl || []).filter((e) => open.has(e) && sym(q, open.get(e)));
+		const ranked = [...open.values()].filter((q) => partners(q).length).map((q) => ({ q, dep: depCount(q.id), xp: reward(q) }));
+		ranked.sort((a, b) => b.dep - a.dep || b.xp - a.xp || a.q.id - b.q.id);
+		for (const { q } of ranked) {
+			if (!open.has(q.id)) continue;
+			const alts = partners(q);
+			if (!alts.length) continue;
+			for (const a of alts) open.delete(a);
+			branches.push({ kept: q.id, dropped: alts.sort((a, b) => a - b) });
+		}
+	}
+	// Quests open to the character but unreachable: id -> the prerequisite
+	// (or parent / child) that blocks them.
+	const blockedBy = new Map();
 	// Prerequisites: any-of (`pre`) and all-of (`preAll`). Open ones count;
 	// ones closed to this character do not apply; ones excluded for missing
 	// data (or not reachable) make the quest unreachable: any-of when none is
@@ -132,6 +177,8 @@ function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } 
 			const kid = (q.after || []).some((c) => !open.has(c) && blocks(c));
 			if ((!kept.length && blocked) || allBlocked || par || kid) {
 				open.delete(q.id);
+				const by = (!kept.length && blocked && q.pre.find((p) => !open.has(p) && blocks(p))) || (allBlocked && (q.preAll || []).find((p) => !open.has(p) && blocks(p))) || (par && q.inLog) || (q.after || []).find((c) => !open.has(c) && blocks(c));
+				blockedBy.set(q.id, by);
 				changed = true;
 			} else {
 				preOf.set(q.id, kept);
@@ -279,7 +326,8 @@ function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } 
 			const wq = worldById.get(qid);
 			sub.push({ kind: KIND[kind], q: qid, task, pt, quest: { pre: (preOf.get(qid) || []).concat(preAllOf.get(qid) || []), inLog: wq.inLog, after: wq.after }, k: kind, qi });
 		}
-		if (!sub.some((s) => s.k === K_TURNIN || s.k === K_TASK)) continue; // nothing earns XP here
+		// Nothing earns XP here; a completionist route still needs the accepts.
+		if (!sub.length || (!completionist && !sub.some((s) => s.k === K_TURNIN || s.k === K_TASK))) continue;
 		const steps = planOrder(sub, { dist: wdist }).map((s) => [s.k, s.qi, s.k === K_TASK ? qTask0[s.qi] + s.task : s.k === K_ACCEPT ? qAccept[s.qi] : -1, usePt(s.pt)]);
 		pkgStart.push(sKind.length);
 		for (const s of steps) {
@@ -397,6 +445,9 @@ function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } 
 		grindSpacing: Float64Array.from(world.grind.spacing),
 		questXpRows: world.questXp,
 		family,
+		completionist,
+		branches,
+		blockedBy,
 		dungeons: dungeons.map((d, i) => ({ name: d.name, min: d.min, max: d.max, pt: ptIndex.get(d.pt), bosses: Int32Array.from(d.bosses), bossCount: d.bossCount, quests: Int32Array.from(dQuests[i]) })),
 		qDungeon,
 	};
@@ -443,5 +494,5 @@ function makeTables(run, p) {
 }
 
 module.exports = {
-	compileRun, makeTables, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY, NEAR_K, MOBL,
+	compileRun, makeTables, questOpen, onIsle, raceBit, popcount, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY, NEAR_K, MOBL,
 };

@@ -127,9 +127,14 @@ const STARTS = {
 	Alliance: { Human: [783, 'Elwynn Forest'], Dwarf: [179, 'Dun Morogh'], Gnome: [179, 'Dun Morogh'], NightElf: [456, 'Teldrassil'], Skyborne: SKYBORNE_START },
 };
 
-function dataHash(dataDir, sourcesDir = null) {
+// The completionist world hashes its variant too (and the variant's own
+// version), so its results never replay on the leveling world or vice versa.
+const VARIANT_VERSION = { completionist: 2 };
+
+function dataHash(dataDir, sourcesDir = null, variant = 'solo') {
 	const h = crypto.createHash('sha1');
 	h.update(`builder:${BUILDER_VERSION}\n`);
+	if (variant && variant !== 'solo') h.update(`variant:${variant}:${VARIANT_VERSION[variant] || 0}\n`);
 	for (const f of ['meta.json', 'travel.json', 'trainers.json', 'dungeons.json']) {
 		const file = path.join(dataDir, f);
 		h.update(`${f}:`);
@@ -277,6 +282,10 @@ function buildWorld(data, opts = {}) {
 	const faction = opts.faction;
 	if (!FACTION_RACES[faction]) throw new Error(`faction must be Alliance or Horde (got ${faction})`);
 	const bandWidth = opts.bandWidth || 5;
+	// The completionist world (docs/SIMULATION.md "Completionist") keeps elite
+	// quests, marked `elite`: elite kill objectives, items only elites or mobs
+	// 5+ levels above drop, quest-starting items from such mobs.
+	const keepElite = opts.variant === 'completionist';
 	const warnings = [];
 	const frames = (data['map-frames'] && data['map-frames'].era) || {};
 	// Live-frame (Forever) bounds: for spawns flagged f "l" and maps without an Era frame.
@@ -535,8 +544,9 @@ function buildWorld(data, opts = {}) {
 			}
 		}
 		const exInst = () => ex(`${inst} quest (instance area or dungeons.json)`, inst);
-		// Droppers a solo character farms: not elite, under quest level + 5.
-		const soloDropper = (e) => !strict || !(ELITE_RANKS.has(e.raw.rank) || npcLevel(e.raw, 0) >= level + SOLO.HIGH_DROPPER);
+		// Droppers a solo character farms: not elite, under quest level + 5
+		// (any in the completionist world).
+		const soloDropper = (e) => !strict || keepElite || !(ELITE_RANKS.has(e.raw.rank) || npcLevel(e.raw, 0) >= level + SOLO.HIGH_DROPPER);
 		const start = raw.start || {};
 		const end = raw.end || {};
 		// Giver. One standing in several places (Minor Manifestation of
@@ -656,6 +666,11 @@ function buildWorld(data, opts = {}) {
 		// Objectives.
 		const objs = Array.isArray(raw.objectives) ? raw.objectives : [];
 		const located = [];
+		// Each located work item records the objective it serves (`obj`, the
+		// index in raw.objectives; -1 none): tasks keep them as `objs`, parallel
+		// to `work`, so an export can name the objective goals (kill/collect/interact ... quest Q).
+		let curObj = -1;
+		const place = (l) => located.push({ ...l, obj: curObj });
 		let missing = null;
 		let missingCat = null; // solo category of the exclusion, if any
 		let elite = false;
@@ -664,8 +679,10 @@ function buildWorld(data, opts = {}) {
 		let outside = false;
 		const escort = ESCORT_RE.test([raw.objectiveText, ...objs.map((o) => o && o.text)].filter(Boolean).join(' '));
 		const events = [];
-		for (const o of objs) {
+		for (let oi = 0; oi < objs.length; oi++) {
+			const o = objs[oi];
 			if (!o) continue;
+			curObj = oi;
 			const count = Number(o.count) > 0 ? Number(o.count) : 1;
 			if (o.type === 'kill') {
 				const e = sites('npc', o.id);
@@ -689,18 +706,18 @@ function buildWorld(data, opts = {}) {
 				const ownFaction = String(e.raw.faction).toUpperCase() === (faction === 'Alliance' ? 'A' : 'H');
 				const deed = ownFaction && DEED_RE.test(String(raw.objectiveText || ''));
 				if (e.raw.faction && e.friendly && (own(start.npc) || own(end.npc) || talk || deed)) {
-					located.push({ pt: s.pt, work: ['use', deed ? count : 1] });
+					place({ pt: s.pt, work: ['use', deed ? count : 1] });
 					continue;
 				}
 				if (e.raw.faction && !e.friendly && talk) continue;
 				const el = ELITE_RANKS.has(e.raw.rank) ? 1 : 0;
-				if (el && strict) {
+				if (el && strict && !keepElite) {
 					missing = `elite kill objective npc ${o.id}`;
 					missingCat = 'elite';
 					break;
 				}
 				if (el) elite = true;
-				located.push({ pt: s.pt, work: ['kill', npcLevel(e.raw, level), count, el, s.spacing] });
+				place({ pt: s.pt, work: ['kill', npcLevel(e.raw, level), count, el, s.spacing] });
 			} else if (o.type === 'object') {
 				const e = sites('object', o.id);
 				if (!e) {
@@ -708,7 +725,7 @@ function buildWorld(data, opts = {}) {
 					outside = true;
 					break;
 				}
-				located.push({ pt: bestSite(e, giver).pt, work: ['use', count] });
+				place({ pt: bestSite(e, giver).pt, work: ['use', count] });
 			} else if (o.type === 'item') {
 				const item = data.items[String(o.id)];
 				let best = null;
@@ -770,12 +787,12 @@ function buildWorld(data, opts = {}) {
 				}
 				if (best) {
 					const n = (count * 100) / best.chance;
-					if (best.kind === 'talk') located.push({ pt: best.s.pt, work: ['use', 1] });
+					if (best.kind === 'talk') place({ pt: best.s.pt, work: ['use', 1] });
 					else if (best.kind === 'npc') {
 						const el = ELITE_RANKS.has(best.e.raw.rank) ? 1 : 0;
 						if (el) elite = true;
-						located.push({ pt: best.s.pt, work: ['kill', npcLevel(best.e.raw, level), n, el, best.s.spacing] });
-					} else located.push({ pt: best.s.pt, work: ['use', n] });
+						place({ pt: best.s.pt, work: ['kill', npcLevel(best.e.raw, level), n, el, best.s.spacing] });
+					} else place({ pt: best.s.pt, work: ['use', n] });
 				} else {
 					// The friendly vendor nearest the giver (same landmass first).
 					let v = null;
@@ -791,7 +808,7 @@ function buildWorld(data, opts = {}) {
 							vd = dd;
 						}
 					}
-					if (v) located.push({ pt: v.pt, work: ['buy'] });
+					if (v) place({ pt: v.pt, work: ['buy'] });
 					else if (skippedHigh) {
 						missing = `item objective ${o.id} drops only from elites or mobs 5+ levels above the quest`;
 						missingCat = 'elite';
@@ -801,7 +818,7 @@ function buildWorld(data, opts = {}) {
 						missingCat = 'rareDrop';
 						break;
 					} else if (!anyDrop) {
-						located.push({ pt: giver, work: ['use', 1] }); // made or handed over on the spot
+						place({ pt: giver, work: ['use', 1] }); // made or handed over on the spot
 						outside = true;
 					} else {
 						missing = `item objective ${o.id} drops only outside the open world`;
@@ -828,9 +845,11 @@ function buildWorld(data, opts = {}) {
 					if (!best || d < best.d) best = { pt, d, o };
 				}
 				const n = Number((String(best.o.text || '').match(/^\s*[A-Za-z']+\s+(\d+)\b/) || [])[1]);
-				located.push({ pt: best.pt, work: escort ? ['escort'] : n > 1 ? ['use', n] : ['visit'] });
+				curObj = objs.indexOf(best.o);
+				place({ pt: best.pt, work: escort ? ['escort'] : n > 1 ? ['use', n] : ['visit'] });
 			} else if (escort || events.every((o) => o.map == null)) {
-				located.push({ pt: giver, work: ['escort'] }); // runs where it starts
+				curObj = -1;
+				place({ pt: giver, work: ['escort'] }); // runs where it starts
 				outside = true;
 			} else {
 				missing = 'event objective outside the open world';
@@ -850,10 +869,11 @@ function buildWorld(data, opts = {}) {
 		for (const l of located) {
 			let t = tasks.find((x) => dist(x.pt, l.pt) <= SITE_R);
 			if (!t) {
-				t = { pt: l.pt, work: [] };
+				t = { pt: l.pt, work: [], objs: [] };
 				tasks.push(t);
 			}
 			t.work.push(l.work);
+			t.objs.push(l.obj); // parallel to work: the objective each work item serves (-1 none)
 		}
 		const q = {
 			id, title, level, minLevel,
@@ -870,7 +890,7 @@ function buildWorld(data, opts = {}) {
 			zone: P(giver).map,
 			breadcrumb: !objs.length,
 			escort: escort && objs.some((o) => o && o.type === 'event'),
-			elite,
+			elite: elite || (keepElite && !!accept && accept.work[0][0] === 'kill' && accept.work[0][3] === 1),
 			gName, eName, gPos, ePos,
 		};
 		if (startFrom != null) q.startFrom = startFrom;
@@ -1357,11 +1377,13 @@ function buildWorld(data, opts = {}) {
 		zones: Object.fromEntries([...new Set(points.map((p) => p[4]))].sort((a, b) => a - b).map((m) => [m, zoneName(m)])),
 		warnings,
 		preRules,
+		variant: opts.variant || 'solo',
 	};
 }
 
-function worldFile(simDir, faction) {
-	return path.join(simDir, `world-${String(faction).toLowerCase()}.json`);
+// variant: 'solo' (the leveling world) or 'completionist' (elite quests kept).
+function worldFile(simDir, faction, variant = 'solo') {
+	return path.join(simDir, `world-${String(faction).toLowerCase()}${variant && variant !== 'solo' ? `-${variant}` : ''}.json`);
 }
 
 // sourcesDir (data/sources): the cached Forever client tables give the
@@ -1378,18 +1400,19 @@ function loadSimData(dataDir, sourcesDir = null) {
 
 // Cached world, rebuilt when the reference data (meta/travel/trainers/
 // dungeons, the client instance tables) or the builder changed.
-// opts: { dataDir, sourcesDir, simDir, faction, rebuild, questXp, log }
+// opts: { dataDir, sourcesDir, simDir, faction, rebuild, questXp, log, variant }
 function getWorld(opts) {
-	const file = worldFile(opts.simDir, opts.faction);
-	const hash = dataHash(opts.dataDir, opts.sourcesDir);
+	const variant = opts.variant || 'solo';
+	const file = worldFile(opts.simDir, opts.faction, variant);
+	const hash = dataHash(opts.dataDir, opts.sourcesDir, variant);
 	if (!opts.rebuild && fs.existsSync(file)) {
 		const w = JSON.parse(fs.readFileSync(file, 'utf8'));
 		if (w.dataHash === hash && w.bandWidth === (opts.bandWidth || 5)) return w;
 	}
-	if (opts.log) opts.log(`building world model for ${opts.faction}...`);
+	if (opts.log) opts.log(`building ${variant === 'solo' ? '' : `${variant} `}world model for ${opts.faction}...`);
 	const data = opts.data || loadSimData(opts.dataDir, opts.sourcesDir);
 	if (!data.questAreas && opts.log) opts.log('  warning: no cached Forever Map/AreaTable: the solo filter knows instances from dungeons.json only');
-	const w = buildWorld(data, { faction: opts.faction, bandWidth: opts.bandWidth, extraStarts: opts.extraStarts });
+	const w = buildWorld(data, { faction: opts.faction, bandWidth: opts.bandWidth, extraStarts: opts.extraStarts, variant });
 	w.dataHash = hash;
 	w.questXp = opts.questXp;
 	fs.mkdirSync(opts.simDir, { recursive: true });
