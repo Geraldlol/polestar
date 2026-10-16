@@ -152,6 +152,23 @@ test('completionist evaluation: no grind to 60, the cost is time plus the grey a
 	assert.ok(Math.abs(ev.policyCost() - before - ev.greySec) < 1e-6);
 });
 
+test('a completionist route may return to a package up to six runs (chains bouncing between zones); a leveling route three', () => {
+	const { run, ev } = setup();
+	const home = [...run.packages.keys()].filter((p) => run.pkgHome[p]);
+	const away = [...run.packages.keys()].find((p) => !run.pkgHome[p] && run.packages[p].dungeon === undefined);
+	assert.ok(away != null);
+	const rep = (n) => [...home, ...Array(n).fill(away)];
+	assert.ok(Number.isFinite(ev.cost(rep(6))), 'six runs are feasible');
+	assert.equal(ev.cost(rep(7)), Infinity);
+	const solo = build();
+	const lrun = compileRun(solo, { race: 'Orc' });
+	const lev = new Evaluator(lrun, makeTables(lrun, means(effective({ calibrated: {} }))));
+	const lhome = [...lrun.packages.keys()].filter((p) => lrun.pkgHome[p]);
+	const laway = [...lrun.packages.keys()].find((p) => !lrun.pkgHome[p] && lrun.packages[p].dungeon === undefined);
+	assert.ok(Number.isFinite(lev.cost([...lhome, ...Array(3).fill(laway)])));
+	assert.equal(lev.cost([...lhome, ...Array(4).fill(laway)]), Infinity);
+});
+
 test('completionist evaluation goes on at 60: no more XP, quests still count, all their XP charged', () => {
 	const { run, ev } = setup();
 	ev.reset();

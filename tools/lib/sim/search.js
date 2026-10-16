@@ -16,7 +16,7 @@
 // gives the same result as one.
 
 const { Rng, hashSeed } = require('./rng');
-const { MAX_VISITS } = require('./evaluate');
+const { maxVisits } = require('./evaluate');
 const { CUM_XP } = require('../game/xp');
 
 function cumXp(ev) {
@@ -102,6 +102,7 @@ function anneal(ev, rng, start, { evals = 3000, t0 = 1500, t1 = 20 } = {}) {
 	let best = cur.slice();
 	let bestCost = curCost;
 	const inRoute = new Uint8Array(run.P); // runs of each package in `cur`
+	const cap = maxVisits(run);
 	const zoneOf = run.packages.map((p) => p.zone);
 	let accepted = 0;
 	for (let it = 0; it < evals; it++) {
@@ -114,11 +115,11 @@ function anneal(ev, rng, start, { evals = 3000, t0 = 1500, t1 = 20 } = {}) {
 		const randomUnused = (near) => {
 			// A package near position `near`'s level band: unused, or (one try
 			// in four) a return to a non-home package run fewer than
-			// MAX_VISITS times.
+			// maxVisits(run) times.
 			const pk = near >= 0 && near < n ? run.packages[cur[near]] : null;
 			for (let tries = 0; tries < 30; tries++) {
 				const p = rng.int(run.P);
-				if (inRoute[p] && (run.pkgHome[p] || inRoute[p] >= MAX_VISITS || rng.int(4) > 0)) continue;
+				if (inRoute[p] && (run.pkgHome[p] || inRoute[p] >= cap || rng.int(4) > 0)) continue;
 				if (pk && Math.abs(run.packages[p].band - pk.band) > 1 && tries < 25) continue;
 				return p;
 			}
