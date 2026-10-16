@@ -79,6 +79,32 @@ test('the completionist world keeps elite quests (marked elite) and every other 
 	assert.deepEqual(brute.tasks.flatMap((t) => t.objs).sort(), [0, 1]);
 });
 
+test('completionist packages follow each zone\'s own level tiers: a quest more than 8 levels above the tier opens a return visit; a chain stays with its predecessor within 2 levels; the log holds 40', () => {
+	const d = data();
+	const base = d.quests[501];
+	const q = (id, title, x) => ({ ...base, id, title, objectives: [{ type: 'kill', id: 10, count: 2 }], ...x });
+	Object.assign(d.quests, {
+		971: q(971, 'Follow-up', { level: 11, minLevel: 11, pre: [501] }),
+		972: q(972, 'Too Late', { level: 12, minLevel: 12 }),
+		973: q(973, 'Return Visit', { level: 22, minLevel: 20 }),
+	});
+	const w = buildWorld(d, { faction: 'Horde', bandWidth: 5, extraStarts: syn.START, variant: 'completionist' });
+	const pkgOf = (id) => w.packages.filter((p) => p.dungeon === undefined && p.zone === VALE && p.quests.includes(id));
+	const first = pkgOf(501)[0];
+	assert.ok(first, 'quest 501 has a package in the vale');
+	assert.ok(pkgOf(971).includes(first), 'the chain quest at 11 stays in its predecessor\'s first tier (1 + 8 + 2)');
+	assert.ok(!pkgOf(972).includes(first), 'a quest at 12 without a chain opens the next tier');
+	assert.ok(!pkgOf(973).includes(first) && !pkgOf(973).includes(pkgOf(972)[0]), 'a quest at 20 is a later return visit');
+	assert.match(pkgOf(973)[0].key, / 20-20$/);
+	// About 35 quests open at once in one zone (25 chores at level 1 and the
+	// vale's own): one package at 40, where 20 would split it.
+	const big = data();
+	for (let i = 0; i < 25; i++) big.quests[980 + i] = q(980 + i, `Chore ${i}`, { level: 1, minLevel: 1 });
+	const bw = buildWorld(big, { faction: 'Horde', bandWidth: 5, extraStarts: syn.START, variant: 'completionist' });
+	const holding = bw.packages.filter((p) => p.quests.some((id) => id >= 980 && id < 1005));
+	assert.equal(holding.filter((p) => p.zone === VALE).length, 1);
+});
+
 test('eligible set: one quest of a two-way exclusive choice (most dependents, then reward, then id), one-way exclusions stay; class quests left to the Class guides', () => {
 	const { run } = setup();
 	// 506/507 list each other: a real choice; equal in every way, so the lower id.
@@ -190,6 +216,9 @@ test('export: Completionist guides follow the guide conventions (category, folde
 	assert.match(g0, /^guide forever\/completionist\/horde\/orc\/01-testvale(-farfield)?\n/);
 	assert.match(g0, /\ncategory Completionist\n/);
 	assert.match(g0, /\nfolder Completionist · Orc 1-20\n/);
+	// The chain's first step warns against "Skip grey quests" (the other starts are grey by then); later guides do not.
+	assert.match(g0, /\nstep [^\n]+\n {2}tip Every quest counts here, grey ones too: keep Options > Automation > "Skip grey quests" off\./);
+	for (const g of guides.slice(1)) assert.doesNotMatch(g.text, /Skip grey quests/);
 	if (guides.length > 1) assert.match(g0, new RegExp(`\\nnext ${guides[1].id}\\n`));
 	// Objectives as goals tied to the quest; the elite quest's goals optional, with the tip.
 	assert.match(text, /\n {2}kill 10 quest 501\.1\n/);
@@ -198,8 +227,8 @@ test('export: Completionist guides follow the guide conventions (category, folde
 	assert.match(text, /\n {2}kill 20 quest 904\.2 optional\n/);
 	assert.match(text, /\n {2}kill 10 quest 904\.1 optional\n/);
 	assert.match(text, /\n {2}turnin 904 optional\n/);
-	assert.match(text, /\n {2}tip Elite Brute is elite: grouping up is advised\.\n/);
-	assert.match(text, /# Optional \(elite: grouping up is advised\): Brute Force \(904; Elite Brute\)/);
+	assert.match(text, /\n {2}tip Elite Brute \(level 5\) is elite: grouping up is advised unless you are well above level 5\.\n/);
+	assert.match(text, /# Optional \(elite: grouping up is advised\): Brute Force \(904; Elite Brute 5\)/);
 	// The profession quest is a note, not a goal.
 	assert.match(text, /note "Profession quests here, for players with the skill: Tailoring Order \(a profession\)\."/);
 	assert.doesNotMatch(text, /accept 907/);

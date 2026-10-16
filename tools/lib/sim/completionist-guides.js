@@ -44,13 +44,18 @@ function band(level) {
 	return `${lo}-${lo + 10}`;
 }
 
-// Elite targets of a quest (names): elite kill objectives, elite droppers of
-// its objective items and of its starting item.
+// Elite targets of a quest ([{ name, level }]; level "11" or "52-54", null
+// when unrecorded): elite kill objectives, elite droppers of its objective
+// items and of its starting item.
 function eliteTargets(raw, data) {
-	const names = [];
+	const out = [];
 	const add = (npcId) => {
 		const n = data.npcs[String(npcId)];
-		if (n && ELITE.has(n.rank) && !n.faction && n.name && !names.includes(n.name)) names.push(String(n.name));
+		if (!(n && ELITE.has(n.rank) && !n.faction && n.name) || out.some((t) => t.name === String(n.name))) return;
+		const lo = Number.parseInt(n.level, 10);
+		const hi = Number.parseInt(n.levelMax, 10);
+		const level = Number.isFinite(lo) ? (Number.isFinite(hi) && hi !== lo ? `${lo}-${hi}` : String(lo)) : null;
+		out.push({ name: String(n.name), level });
 	};
 	for (const o of (raw && raw.objectives) || []) {
 		if (!o) continue;
@@ -63,10 +68,18 @@ function eliteTargets(raw, data) {
 		}
 	}
 	for (const item of ((raw && raw.start) || {}).item || []) for (const id of Object.keys((((data.items[String(item)] || {}).drops || {}).npc) || {})) add(id);
-	return names;
+	return out;
 }
 
-// Goal lines for one executed step. -> [{ text, optional, elite: [names] }]
+// The step tip for an elite target: the house wording (validate.js
+// eliteTip), with its level so a player can tell whether to group.
+function eliteTip(t) {
+	return t.level
+		? `${t.name} (level ${t.level}) is elite: grouping up is advised unless you are well above level ${t.level.split('-').pop()}.`
+		: `${t.name} is elite: grouping up is advised.`;
+}
+
+// Goal lines for one executed step. -> [{ text, optional, elite: [{ name, level }] }]
 function goalsFor(e, ctx) {
 	const { run, data } = ctx;
 	const qi = run.qIndex.get(e.q);
@@ -315,7 +328,7 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 			`keywords completionist, every quest${g.zones.length > 1 ? `, ${g.zones.join(', ')}` : ''}`,
 		];
 		if (i + 1 < guides.length) L.push(`next ${guides[i + 1].id}`);
-		const elites = [...eliteQuests.entries()].map(([q, names]) => `${data.quests[String(q)] ? data.quests[String(q)].title : q} (${q}; ${names.join(', ')})`);
+		const elites = [...eliteQuests.entries()].map(([q, ts]) => `${data.quests[String(q)] ? data.quests[String(q)].title : q} (${q}; ${ts.map((t) => (t.level ? `${t.name} ${t.level}` : t.name)).join(', ')})`);
 		const dungeons = g.zones.flatMap((z) => (dungeonByZone.get(z) || []).map((o) => `${o.title} (${o.id})`));
 		const wrap = (text) => {
 			const out = [];
@@ -355,14 +368,18 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		}
 		L.push('#');
 		L.push(...wrap(`Left to other guides: class quests (the Class category)${dungeons.length ? `; dungeon quests (the Dungeons guides): ${dungeons.join(', ')}` : ''}.`));
-		for (const s of kept) {
+		// The chain's first step: the other starting zones are grey by the time
+		// the route gets there, so "Skip grey quests" would skip them silently.
+		const greyTip = 'Every quest counts here, grey ones too: keep Options > Automation > "Skip grey quests" off.';
+		kept.forEach((s, k) => {
 			L.push('', `step ${s.title}`);
 			if (s.zone) L.push(`  zone ${s.zone}`);
-			const tips = [...new Set(s.goals.flatMap((x) => x.elite || []))].map((n) => `${n} is elite: grouping up is advised.`);
+			const tips = [...new Set(s.goals.flatMap((x) => (x.elite || []).map(eliteTip)))];
 			for (const x of s.goals) if (x.tip && !tips.includes(x.tip)) tips.push(x.tip);
+			if (i === 0 && k === 0) tips.unshift(greyTip);
 			if (tips.length) L.push(`  tip ${tips.join(' ')}`);
 			for (const goal of s.goals) L.push(`  ${goal.text}`);
-		}
+		});
 		return { id: g.id, file: `${g.id}.guide`, text: `${L.join('\n')}\n`, levels: [g.lo, g.hi], zones: g.zones, quests: quests.size, seconds: g.seconds };
 	});
 }

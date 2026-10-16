@@ -42,8 +42,10 @@
 // count), nothing is ground after the last package, and the route's cost is
 // the time to its last step plus the policies: grinding and zone changes as
 // above, `greyWeight` × the time to grind back the XP quests lost by being
-// turned in above their level (`greySec`, all of it at 60), and `missWeight`
-// per quest of the run (the eligible set) left undone.
+// turned in above their level (`greySec`, all of it at 60), `missWeight`
+// per quest of the run (the eligible set) left undone, and `returnWeight`
+// per return to a package already run (`returns`): a zone visit does what it
+// can in one go, and comes back only when that clearly pays.
 
 const { Travel } = require('./travel');
 const { MOBL, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY } = require('./run');
@@ -141,6 +143,7 @@ class Evaluator {
 		this.steps = 0;
 		this.catchUpSec = 0;
 		this.zoneChanges = 0;
+		this.returns = 0;
 		this.awayPending = false;
 		this.capped = false;
 		this.xpLost = 0;
@@ -156,7 +159,7 @@ class Evaluator {
 			infeasible: this.infeasible, hearths: this.hearths, flights: this.flights, levelFrom: this.level,
 			xpDungeon: this.xpDungeon, dungeonSec: this.dungeonSec, dungeonsRun: this.dungeonsRun,
 			homeLeft: this.homeLeft, unreachable: this.unreachable, riskCrossings: this.riskCrossings, steps: this.steps, catchUpSec: this.catchUpSec,
-			zoneChanges: this.zoneChanges, capped: this.capped, xpLost: this.xpLost, greySec: this.greySec, greyQuests: this.greyQuests,
+			zoneChanges: this.zoneChanges, returns: this.returns, capped: this.capped, xpLost: this.xpLost, greySec: this.greySec, greyQuests: this.greyQuests,
 		};
 	}
 
@@ -194,6 +197,7 @@ class Evaluator {
 		this.steps = s.steps;
 		this.catchUpSec = s.catchUpSec;
 		this.zoneChanges = s.zoneChanges;
+		this.returns = s.returns;
 		this.capped = s.capped;
 		this.xpLost = s.xpLost;
 		this.greySec = s.greySec;
@@ -534,8 +538,11 @@ class Evaluator {
 		if (!this.usedPkg[p]) {
 			this.set1(J_PKG, this.usedPkg, p);
 			if (r.pkgHome[p]) this.homeLeft--;
-		} else if (!this.visit2[p]) this.set1(J_VISIT2, this.visit2, p);
-		else this.set1(J_VISIT3, this.visit3, p);
+		} else {
+			this.returns++;
+			if (!this.visit2[p]) this.set1(J_VISIT2, this.visit2, p);
+			else this.set1(J_VISIT3, this.visit3, p);
+		}
 		// Away below level 10: grind to 10 before the package's first move
 		// (moveTo), so a package that does nothing grinds nothing.
 		this.awayPending = r.pkgAway[p] === 1 && this.level < r.homeLevel;
@@ -681,7 +688,7 @@ class Evaluator {
 	policyCost() {
 		const p = this.p;
 		const policy = ((p.grindWeight || 1) - 1) * this.grindSec + (p.zoneChange || 0) * this.zoneChanges;
-		if (this.run.completionist) return this.time + policy + (p.greyWeight || 0) * this.greySec + (p.missWeight || 0) * (this.run.Q - this.questsDone);
+		if (this.run.completionist) return this.time + policy + (p.greyWeight || 0) * this.greySec + (p.missWeight || 0) * (this.run.Q - this.questsDone) + (p.returnWeight || 0) * this.returns;
 		return (this.levelTimes[60] || this.time) + policy;
 	}
 

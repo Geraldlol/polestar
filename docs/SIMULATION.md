@@ -684,6 +684,18 @@ model, evaluator and search; what changes:
   60). Its hash includes the variant, so its results never replay on the
   leveling world. Tasks in both worlds record the quest objective each work
   item serves (`objs`, parallel to `work`), for exports.
+- **Zone tiers and the quest log** (world.js `COMPLETIONIST_TIER`,
+  `COMPLETIONIST_MAX_OPEN`): packages follow each zone's own levels, not the
+  5-level bands. A zone's quests, by minimum level, form tiers: a quest more
+  than 8 levels above its tier's first opens the next tier, and a chain stays
+  with its predecessor's tier within 2 levels. So the first tier is the
+  zone's visit (every quest the character can take there then) and the
+  later ones are its return visits (Elwynn Forest 1-8, 10-22, 20-22; Stormwind
+  City 1-14 … 50-57). A step in another zone than its quest's (a turn-in in a
+  city, an objective over the border) joins that zone's tier that covers its
+  quest's tier, so it is done on that visit. A package splits only past 40
+  open quests, Forever's quest log (the leveling world still plans with 20,
+  issue #30).
 - **Eligible set** (`compileRun(…, { family: 'completionist' })`): every quest
   of the world open to the race (masks, Zephras Isle for the Skyborne only),
   without class quests (the Class guides cover them) and dungeon quests (the
@@ -698,7 +710,7 @@ model, evaluator and search; what changes:
   not end the route (`capped`: no more XP, quests still count). The route's
   cost (`Evaluator.policyCost`) is the time to its last step, plus the
   leveling policies (grinding ×`grindWeight`, `zoneChange` per zone move),
-  plus two completionist policies:
+  plus three completionist policies:
   - `missWeight` (7200 s): each eligible quest left undone, far above any
     quest's time, so the route never trades a quest for time;
   - `greyWeight` (1): XP a quest loses by being turned in above its level
@@ -706,7 +718,12 @@ model, evaluator and search; what changes:
     earn it by grinding at the quest's level. A quest that goes grey costs
     about what doing it in time would have earned; a late cleanup pass (a
     package visited again, up to three times) is allowed and pays for the XP
-    its quests lost. `--grey-weight 0` is "fewest hours".
+    its quests lost. `--grey-weight 0` is "fewest hours";
+  - `returnWeight` (3600 s): each return to a package already run, so a zone
+    visit does what it can in one go (arriving a level later if need be) and
+    the route comes back only when that clearly pays: chains through another
+    zone (Darkshore to Darnassus and back), quests above the level on the
+    first visit.
 - **Construction** scores a package by progress per hour of its policy
   cost: quests turned in, plus a fifth per other step (accepts and
   objectives lead to turn-ins elsewhere); every package up to the window's
@@ -730,7 +747,10 @@ model, evaluator and search; what changes:
   the NPC, objectives after the map area), objectives as `kill` / `collect`
   / `interact … quest Q.O` (the world's `objs`), `complete` for events at a
   quest's last site, every goal of an elite quest `optional` with the tip
-  "<Target> is elite: grouping up is advised.", the profession quests of the
-  guide's zones as a note in its last step, and header comments (route,
-  flow, optional elites, profession quests, dungeon quests left to the
-  Dungeons guides). `--limit N` writes the first N.
+  "<Target> (level N) is elite: grouping up is advised unless you are well
+  above level N." (the base wording when the level is unrecorded), the
+  profession quests of the guide's zones as a note in its last step, a tip
+  in the chain's first step to keep "Skip grey quests" off (the other
+  starting zones are grey by the time the route gets there), and header
+  comments (route, flow, optional elites, profession quests, dungeon quests
+  left to the Dungeons guides). `--limit N` writes the first N.

@@ -91,6 +91,13 @@ const NEAR_HUB = 200; // yards: a flight master or inn this close belongs to the
 // which only splits a zone's quest package (one: Alliance Elwynn Forest 6-10).
 // 40 lands in 0.2.5 with the next world and new searches (issue #30).
 const MAX_OPEN = 20;
+// The completionist world plans with Forever's 40 (it is new: no published
+// search to keep), and packages each zone's quests in tiers: a tier opens
+// when a quest's minimum level is more than COMPLETIONIST_TIER above the
+// tier's first, so a zone visit does every quest of the zone the character
+// can take then and the rest is a return visit (docs/SIMULATION.md §10).
+const COMPLETIONIST_MAX_OPEN = 40;
+const COMPLETIONIST_TIER = 8;
 const MIN_START_DROP = 1; // % drop chance for a quest-starting item to count
 // % assumed for an item drop (objective or quest-starting item) without a
 // recorded rate (Forever creatures in items.json drops with chance null);
@@ -129,7 +136,7 @@ const STARTS = {
 
 // The completionist world hashes its variant too (and the variant's own
 // version), so its results never replay on the leveling world or vice versa.
-const VARIANT_VERSION = { completionist: 2 };
+const VARIANT_VERSION = { completionist: 3 };
 
 function dataHash(dataDir, sourcesDir = null, variant = 'solo') {
 	const h = crypto.createHash('sha1');
@@ -1118,27 +1125,79 @@ function buildWorld(data, opts = {}) {
 	// ---- packages ----
 	// Band of a quest: by level, but a chain stays with its predecessor's band
 	// while its level is within the band (plus 2 levels of slack).
+	// The completionist world uses zone tiers instead (COMPLETIONIST_TIER):
+	// bandOf holds the tier's first minimum level.
 	const bandOf = new Map();
-	const sorted = quests.slice().sort((a, b) => a.level - b.level || a.id - b.id);
 	const bandIdx = (lvl) => Math.floor((Math.max(1, lvl) - 1) / bandWidth);
-	for (let pass = 0; pass < 3; pass++) {
-		for (const q of sorted) {
-			let b = bandIdx(q.level);
-			for (const p of q.inLog != null ? q.pre.concat(q.inLog) : q.pre) {
-				const pq = byId.get(p);
-				if (!pq || pq.zone !== q.zone || !bandOf.has(p)) continue;
-				const pb = bandOf.get(p);
-				if (q.level <= (pb + 1) * bandWidth + 2 && pb < b) b = pb;
+	const maxOpen = keepElite ? COMPLETIONIST_MAX_OPEN : MAX_OPEN;
+	const chainOf = (q) => (q.inLog != null ? q.pre.concat(q.inLog) : q.pre);
+	const tierStarts = new Map(); // completionist: zone -> its tiers' first levels, ascending
+	if (keepElite) {
+		const minOf = (q) => Math.max(1, q.minLevel || q.level || 1);
+		const zoneOf = (q) => (q.zone != null ? q.zone : P(q.giver).map);
+		const byZone = new Map();
+		for (const q of quests) {
+			const z = zoneOf(q);
+			if (!byZone.has(z)) byZone.set(z, []);
+			byZone.get(z).push(q);
+		}
+		for (const [z, list] of byZone) {
+			list.sort((a, b) => minOf(a) - minOf(b) || a.id - b.id);
+			let start = null;
+			for (const q of list) {
+				let s = start == null || minOf(q) > start + COMPLETIONIST_TIER ? minOf(q) : start;
+				start = s;
+				// A chain stays in its predecessor's (earlier) tier within 2 levels.
+				for (const p of chainOf(q)) {
+					const pq = byId.get(p);
+					if (!pq || zoneOf(pq) !== z || !bandOf.has(p)) continue;
+					const ps = bandOf.get(p);
+					if (ps < s && minOf(q) <= ps + COMPLETIONIST_TIER + 2) s = ps;
+				}
+				bandOf.set(q.id, s);
 			}
-			bandOf.set(q.id, b);
+			tierStarts.set(z, [...new Set(list.map((q) => bandOf.get(q.id)))].sort((a, b) => a - b));
+		}
+	} else {
+		const sorted = quests.slice().sort((a, b) => a.level - b.level || a.id - b.id);
+		for (let pass = 0; pass < 3; pass++) {
+			for (const q of sorted) {
+				let b = bandIdx(q.level);
+				for (const p of chainOf(q)) {
+					const pq = byId.get(p);
+					if (!pq || pq.zone !== q.zone || !bandOf.has(p)) continue;
+					const pb = bandOf.get(p);
+					if (q.level <= (pb + 1) * bandWidth + 2 && pb < b) b = pb;
+				}
+				bandOf.set(q.id, b);
+			}
 		}
 	}
+	// Package band (search neighbourhood, home packages): the level band of a
+	// completionist tier's first level.
+	const bandOfGroup = (v) => (keepElite ? bandIdx(v) : v);
+	// A completionist step in another zone than its quest's (a turn-in in a
+	// city, an objective over the border) joins that zone's tier that covers
+	// its quest's tier: the latest opening by it within the tier width (2
+	// levels of slack), else the zone's first if that opens within the width
+	// after it; so it is done on that zone's visit. Otherwise (and in a zone
+	// without quests of its own) it groups by its quest's tier.
+	const hostTier = (zone, s) => {
+		const starts = tierStarts.get(zone);
+		if (!starts) return s;
+		let t = null;
+		for (const v of starts) if (v <= s) t = v;
+		if (t != null && s <= t + COMPLETIONIST_TIER + 2) return t;
+		if (t == null && starts[0] - s <= COMPLETIONIST_TIER) return starts[0];
+		return s;
+	};
 	// Steps by (zone of the step's point, band of its quest).
 	const groups = new Map();
 	const addStep = (q, kind, task, pt) => {
 		const zone = P(pt).map;
-		const k = `${zone}:${bandOf.get(q.id)}`;
-		if (!groups.has(k)) groups.set(k, { zone, band: bandOf.get(q.id), steps: [] });
+		const b = keepElite ? hostTier(zone, bandOf.get(q.id)) : bandOf.get(q.id);
+		const k = `${zone}:${b}`;
+		if (!groups.has(k)) groups.set(k, { zone, band: bandOfGroup(b), tier: keepElite ? b : null, steps: [] });
 		groups.get(k).steps.push({ kind, q: q.id, task, pt, quest: q });
 	};
 	for (const q of quests) {
@@ -1151,17 +1210,17 @@ function buildWorld(data, opts = {}) {
 	const keys = [...groups.keys()].sort((a, b) => {
 		const A = groups.get(a);
 		const B = groups.get(b);
-		return A.band - B.band || A.zone - B.zone;
+		return A.band - B.band || (A.tier || 0) - (B.tier || 0) || A.zone - B.zone;
 	});
 	for (const k of keys) {
 		const g = groups.get(k);
 		const order = planOrder(g.steps, { dist: (a, b) => dist(a, b) });
-		// Split when more than MAX_OPEN quests would be open at once.
+		// Split when more than maxOpen quests would be open at once.
 		const chunks = [];
 		let cur = [];
 		let open = 0;
 		for (const s of order) {
-			if (s.kind === 'accept' && open >= MAX_OPEN) {
+			if (s.kind === 'accept' && open >= maxOpen) {
 				chunks.push(cur);
 				cur = [];
 				open = 0;
@@ -1176,8 +1235,10 @@ function buildWorld(data, opts = {}) {
 			const lv = qs.map((id) => byId.get(id).level);
 			const lo = Math.min(...lv);
 			const hi = Math.max(...lv);
+			const tierHi = Math.max(...qs.map((id) => byId.get(id).minLevel || byId.get(id).level || 1));
+			const span = g.tier != null ? `${g.tier}-${Math.max(g.tier, tierHi)}` : `${g.band * bandWidth + 1}-${(g.band + 1) * bandWidth}`;
 			packages.push({
-				key: `${zoneName(g.zone)} ${g.band * bandWidth + 1}-${(g.band + 1) * bandWidth}${chunks.length > 1 ? String.fromCharCode(97 + ci) : ''}`,
+				key: `${zoneName(g.zone)} ${span}${chunks.length > 1 ? String.fromCharCode(97 + ci) : ''}`,
 				zone: g.zone,
 				zoneName: zoneName(g.zone),
 				band: g.band,
