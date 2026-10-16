@@ -16,7 +16,7 @@ const { construct } = require('../tools/lib/sim/search');
 const { Rng } = require('../tools/lib/sim/rng');
 const { effective, means } = require('../tools/lib/sim/params');
 const { coverage, coverageMarkdown } = require('../tools/lib/sim/completionist');
-const { completionistGuides } = require('../tools/lib/sim/completionist-guides');
+const { completionistGuides, straightTurnins } = require('../tools/lib/sim/completionist-guides');
 const { executedSteps } = require('../tools/lib/sim/export');
 const { LEVEL_XP } = require('../tools/lib/game/xp');
 const syn = require('./fixtures/sim/synthetic');
@@ -252,11 +252,11 @@ test('export: Completionist guides follow the guide conventions (category, folde
 	const d = data();
 	const entries = executedSteps(ev, run, route);
 	const cov = coverage({ world: w, run, ev, route, data: d });
-	const guides = completionistGuides({ world: w, run, data: d, entries, meta: { faction: 'Horde', race: 'Orc', label: 'test route' }, place: () => null, coverage: cov, base: 'forever/completionist/horde/orc' });
+	const guides = completionistGuides({ world: w, run, data: d, entries, meta: { faction: 'Horde', race: 'Orc', label: 'test route' }, place: () => null, coverage: cov, base: 'completionist/horde/orc' });
 	assert.ok(guides.length >= 1);
 	const text = guides.map((g) => g.text).join('\n');
 	const g0 = guides[0].text;
-	assert.match(g0, /^guide forever\/completionist\/horde\/orc\/01-testvale(-farfield)?\n/);
+	assert.match(g0, /^guide completionist\/horde\/orc\/01-testvale(-farfield)?\n/);
 	assert.match(g0, /\ncategory Completionist\n/);
 	assert.match(g0, /\nfolder Completionist · Orc 1-20\n/);
 	// The chain's first step warns against "Skip grey quests" (the other starts are grey by then); later guides do not.
@@ -282,4 +282,43 @@ test('export: Completionist guides follow the guide conventions (category, folde
 			assert.ok(goals.some((l) => !/ optional$/.test(l)), `a step of optional goals only:\n${step}`);
 		}
 	}
+});
+
+test('export: a timed quest item is followed by the rest of its quest (an escort\'s complete, the turn-in that spends it), with how long it lasts', () => {
+	const data = {
+		items: { 10439: { id: 10439, name: "Durnan's Scalding Mornbrew", duration: 300 }, 50: { id: 50, name: 'Fresh Fish', duration: 600 } },
+		quests: { 3364: { id: 3364, sourceItem: 10439, objectives: [] }, 70: { id: 70, objectives: [{ type: 'item', id: 50 }, { type: 'kill', id: 9 }] } },
+	};
+	const g = (text, q) => ({ text, q });
+	const steps = [
+		{ title: 'Nori', goals: [g('accept 3364', 3364), g('accept 70', 70)] },
+		{ title: 'Pond', goals: [g('collect 50 quest 70.1', 70)] },
+		{ title: 'Wolves', goals: [g('kill 9 quest 70.2', 70)] },
+		{ title: 'Durnan', goals: [g('turnin 3364', 3364), g('turnin 70', 70)] },
+	];
+	const out = straightTurnins(steps, data);
+	assert.deepEqual(out.map((s) => [s.title, s.goals.map((x) => x.text)]), [
+		['Nori', ['accept 3364', 'accept 70']],
+		['Durnan', ['turnin 3364']],
+		['Pond', ['collect 50 quest 70.1']],
+		['Wolves', ['kill 9 quest 70.2']],
+		['Durnan', ['turnin 70']],
+	]);
+	assert.equal(out[1].goals[0].tip, "Durnan's Scalding Mornbrew lasts 5 minutes: go straight on with it.");
+	// An escort with a canteen: its complete and turn-in come up before the raft.
+	data.items[11804] = { id: 11804, name: "Spraggle's Canteen", duration: 1500 };
+	data.quests[4491] = { id: 4491, sourceItem: 11804, objectives: [{ type: 'event' }] };
+	const esc = straightTurnins([
+		{ title: 'Ringo', goals: [g('accept 4491', 4491)] },
+		{ title: 'A Wrecked Raft', goals: [g('accept 3844', 3844)] },
+		{ title: "Marshal's Refuge", goals: [g('complete 4491', 4491), g('turnin 3844', 3844)] },
+		{ title: 'Spraggle Frock', goals: [g('turnin 4491', 4491)] },
+	], data);
+	assert.deepEqual(esc.map((s) => [s.title, s.goals.map((x) => x.text)]), [
+		['Ringo', ['accept 4491']],
+		["Marshal's Refuge", ['complete 4491']],
+		['Spraggle Frock', ['turnin 4491']],
+		['A Wrecked Raft', ['accept 3844']],
+		["Marshal's Refuge", ['turnin 3844']],
+	]);
 });

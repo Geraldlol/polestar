@@ -740,7 +740,9 @@ model, evaluator and search; what changes:
   (accepted not finished, prerequisite not done, closed by an exclusive
   quest, parent not in the log, never reached).
 - **Export** (`sim export --result <completionist result>`) writes
-  `category Completionist` guides
+  `category Completionist` guides for the Completionist pack
+  (packs/completionist, pack id `completionist`, its own addon
+  `PolestarPack_Completionist`, ids `completionist/<faction>/<race>/NN-…`)
   (tools/lib/sim/completionist-guides.js): one per stretch of the route
   (a zone visit with fewer than 6 accepts and turn-ins joins the guide
   before it), steps per place and per kind of stop (quest givers named after

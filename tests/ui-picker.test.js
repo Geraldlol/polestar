@@ -298,8 +298,8 @@ test('Completionist: its own category after Class, a chain listed in route order
 			table.insert(uistub.order, id)
 		end
 		-- The second guide starts lower (a cleanup pass): the route order still wins.
-		comp("forever/completionist/alliance/human/01-elwynn-forest", "Elwynn Forest", 1, 12, { 7001, 7002, 7003 })
-		comp("forever/completionist/alliance/human/02-stormwind-city", "Stormwind City", 1, 9, { 7004 })
+		comp("completionist/alliance/human/01-elwynn-forest", "Elwynn Forest", 1, 12, { 7001, 7002, 7003 })
+		comp("completionist/alliance/human/02-stormwind-city", "Stormwind City", 1, 9, { 7004 })
 		Polestar.Compat.IsQuestCompleted = function(id) return id == 7001 or id == 7003 end
 		UI.ShowPicker()
 		P.SetCategory("Completionist")

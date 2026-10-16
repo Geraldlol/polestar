@@ -32,6 +32,20 @@ const BIG = 12; // turn-ins: a visit with this many starts a guide
 const LONG = 3 * 3600; // seconds: a guide this long takes no more 3+ turn-in visits
 const STEP_R = 150; // yards: consecutive goals this close share a step
 const ELITE = new Set([1, 2, 3]);
+// An object objective the quest does not have you click (as
+// tests/guides-patterns.test.js reads it).
+const NOT_A_CLICK = /\/sit\b|\buse your\b[^.]*\bracial\b|\bcast\b/i;
+
+// An item only vendors sell: its only droppers are its vendors (the data
+// lists a vendor's stock as its drops, so the world reads Rhapsody Malt as a
+// kill of the Kharanos barkeep); as tests/guides-patterns.test.js reads it.
+function vendorOnly(it) {
+	if (!it || !Array.isArray(it.vendors) || !it.vendors.length) return false;
+	const vendors = new Set(it.vendors.map(Number));
+	const drops = it.drops || {};
+	if (Object.keys(drops.object || {}).length || (it.containers || []).length) return false;
+	return Object.keys(drops.npc || {}).every((npc) => vendors.has(Number(npc)));
+}
 
 function slug(s) {
 	return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -85,6 +99,74 @@ function eliteTip(targets) {
 	return top ? `${list} ${be} elite: grouping up is advised unless you are well above level ${top}.` : `${list} ${be} elite: grouping up is advised.`;
 }
 
+// Timed quest items (items.json `duration`, tools/lib/dsl/timed.js): the
+// route's order knows nothing of them, so Durnan's Scalding Mornbrew (five
+// minutes) would wait an hour for its turn-in. A step that gets one (an
+// `accept` whose quest hands it over, a `collect` or `buy` of it) is followed by the
+// rest of that quest: its later goals (an escort's `complete`, other
+// objectives) and the turn-in that spends the item, each in a step titled as
+// before, the first with a tip on how long the item lasts.
+// steps: [{ title, goals: [{ text, q }] }] -> the same, reordered.
+function straightTurnins(steps, data, home = null) {
+	const timed = (id) => {
+		const it = data.items[String(id)];
+		return it && it.duration > 0 ? it : null;
+	};
+	const spends = (q, item) => {
+		const raw = data.quests[String(q)] || {};
+		return raw.sourceItem === item || (raw.objectives || []).some((o) => o && o.type === 'item' && o.id === item) || (raw.requiredItems || []).includes(item);
+	};
+	// Each step's effective zone (`zone` lines carry over to later steps).
+	let cur = home;
+	const out = steps.map((s) => {
+		if (s.zone) cur = s.zone;
+		return { ...s, goals: s.goals.slice(), _z: cur };
+	});
+	for (let s = 0; s < out.length; s++) {
+		for (const goal of out[s].goals.slice()) {
+			const m = /^(accept|collect|buy) (\d+)/.exec(goal.text || '');
+			if (!m) continue;
+			const item = m[1] === 'accept' ? (data.quests[m[2]] || {}).sourceItem : Number(m[2]);
+			const it = item && timed(item);
+			if (!it) continue;
+			// The first later turn-in that spends it.
+			let at = null;
+			for (let k = s + 1; k < out.length && !at; k++) {
+				const j = out[k].goals.findIndex((x) => /^turnin /.test(x.text || '') && x.q != null && spends(x.q, item));
+				if (j >= 0) at = { k, j };
+			}
+			if (!at) continue;
+			const q = out[at.k].goals[at.j].q;
+			// The quest's goals from here to its turn-in, by step.
+			const moved = [];
+			for (let k = s + 1; k <= at.k; k++) {
+				const mine = out[k].goals.filter((x) => x.q === q);
+				if (!mine.length) continue;
+				moved.push({ ...out[k], goals: mine });
+			}
+			// Already straight on: nothing else between.
+			const others = out.slice(s + 1, at.k + 1).some((x) => x.goals.some((y) => y.q !== q));
+			if (!others) continue;
+			for (let k = s + 1; k <= at.k; k++) out[k].goals = out[k].goals.filter((x) => x.q !== q);
+			const mins = Math.max(1, Math.round(it.duration / 60));
+			moved[0].goals[0] = { ...moved[0].goals[0], tip: `${it.name} lasts ${mins} minute${mins === 1 ? '' : 's'}: go straight on with it.` };
+			out.splice(s + 1, 0, ...moved);
+			s += moved.length;
+			break;
+		}
+	}
+	// Zone lines from each step's own zone: a moved step keeps the zone it was
+	// in, and the step after it says where the route is again.
+	const kept = out.filter((s) => s.goals.length);
+	let prev = home;
+	for (const s of kept) {
+		s.zone = s._z !== prev ? s._z : null;
+		prev = s._z;
+		delete s._z;
+	}
+	return kept;
+}
+
 // Goal lines for one executed step. -> [{ text, optional, elite: [{ name, level }] }]
 function goalsFor(e, ctx) {
 	const { run, data } = ctx;
@@ -134,10 +216,15 @@ function goalsFor(e, ctx) {
 				if (work[0] !== 'kill' || fac.includes(own)) whole = true;
 				else lines.push([`kill ${o.id} quest ${e.q}.${oi + 1}`, name('npc', o.id)]);
 			} else if (o.type === 'item') {
-				if (work[0] === 'buy') lines.push([`buy ${o.id} x${Number(o.count) > 0 ? o.count : 1} nearest`, name('item', o.id)]);
+				if (work[0] === 'buy' || vendorOnly(data.items[String(o.id)])) lines.push([`buy ${o.id} x${Number(o.count) > 0 ? o.count : 1} nearest`, name('item', o.id)]);
 				else if (work[0] === 'kill' || (work[0] === 'use' && work[1] !== 1)) lines.push([`collect ${o.id} quest ${e.q}.${oi + 1}`, name('item', o.id)]);
 				else whole = true; // handed over, or made on the spot
-			} else if (o.type === 'object') lines.push([`interact ${o.id} quest ${e.q}.${oi + 1}`, name('object', o.id)]);
+			} else if (o.type === 'object') {
+				// Not a click (/sit at a campfire, a racial cast at a ley line):
+				// the goal says what the quest asks, in its own words.
+				const how = (String(raw.objectiveText || '').split(/(?<=\.)\s+/).find((x) => NOT_A_CLICK.test(x)) || '').replace(/\.$/, '').replace(/"/g, "'");
+				lines.push([`interact ${o.id} quest ${e.q}.${oi + 1}${how ? ` "${how}"` : ''}`, name('object', o.id)]);
+			}
 			else whole = true;
 		});
 		// `complete` holds its step until every objective is done: only at the
@@ -314,7 +401,7 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 				if (next && !next.zone) next.zone = st.zone;
 			}
 		}
-		const kept = steps.filter((s) => s.goals.length);
+		const kept = straightTurnins(steps.filter((s) => s.goals.length), data, g.zone);
 		// Profession quests given in this guide's zones: a note in the last step.
 		const prof = g.zones.flatMap((z) => profByZone.get(z) || []).filter((o) => !guides.slice(0, i).some((x) => x.zones.includes(o.zone)));
 		if (prof.length && kept.length) {
@@ -394,4 +481,4 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 	});
 }
 
-module.exports = { completionistGuides, eliteTargets, band };
+module.exports = { completionistGuides, eliteTargets, straightTurnins, band };

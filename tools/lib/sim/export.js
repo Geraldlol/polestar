@@ -402,7 +402,9 @@ async function exportGuides(o) {
 	if (res.family === 'completionist') {
 		const data = { ...loadData(o.dataDir), professions: readJson(path.join(o.dataDir, 'professions.json')) };
 		const coverage = require('./completionist').coverage({ world, run, ev, route, data });
-		const base = `forever/completionist/${res.faction.toLowerCase()}/${slug(res.race)}`;
+		// The Completionist guides are their own pack (packs/completionist,
+		// pack id `completionist`), so their ids start with its prefix.
+		const base = `completionist/${res.faction.toLowerCase()}/${slug(res.race)}`;
 		meta.label = `the simulator's completionist route for ${res.race} (${res.best.questsDone} of ${res.best.eligible} eligible quests, ${(res.best.seconds / 3600).toFixed(1)} h, world ${world.dataHash.slice(0, 12)})`;
 		return exportRoute({ world, ev, run, route, meta, out: o.out, base, places, camps, completionist: { data, coverage, limit: o.limit || Infinity } });
 	}
