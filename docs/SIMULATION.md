@@ -682,8 +682,8 @@ model, evaluator and search; what changes:
   exclusion stays (dungeon, raid, PvP, rare drops, reputation above Friendly,
   repeatables, professions, seasonal events, placeholders, minimum level
   60). Its hash includes the variant, so its results never replay on the
-  leveling world. Tasks in both worlds record the quest objective each work
-  item serves (`objs`, parallel to `work`), for exports.
+  leveling world. Its tasks record the quest objective each work item serves
+  (`objs`, parallel to `work`), for exports.
 - **Zone tiers and the quest log** (world.js `COMPLETIONIST_TIER`,
   `COMPLETIONIST_MAX_OPEN`): packages follow each zone's own levels, not the
   5-level bands. A zone's quests, by minimum level, form tiers: a quest more
@@ -695,7 +695,11 @@ model, evaluator and search; what changes:
   city, an objective over the border) joins that zone's tier that covers its
   quest's tier, so it is done on that visit. A package splits only past 40
   open quests, Forever's quest log (the leveling world still plans with 20,
-  issue #30).
+  issue #30). A visit's tier spans up to 8 levels, too wide for one tour, so
+  the run walks it in 5-level slices by minimum level, each toured on its
+  own (run.js `sliceOrder`; a quest goes no earlier than the slice of a
+  prerequisite or parent in the package): a level 1 Orc does the Valley of
+  Trials before Razor Hill.
 - **Eligible set** (`compileRun(…, { family: 'completionist' })`): every quest
   of the world open to the race (masks, Zephras Isle for the Skyborne only),
   without class quests (the Class guides cover them) and dungeon quests (the
@@ -717,8 +721,9 @@ model, evaluator and search; what changes:
     (the 80/60/40/20/10% steps, and all of it at 60) counts as the time to
     earn it by grinding at the quest's level. A quest that goes grey costs
     about what doing it in time would have earned; a late cleanup pass (a
-    package visited again, up to three times) is allowed and pays for the XP
-    its quests lost. `--grey-weight 0` is "fewest hours";
+    package visited again, up to six runs in all: `COMPLETIONIST_MAX_VISITS`,
+    leveling routes three) is allowed and pays for the XP its quests lost.
+    `--grey-weight 0` is "fewest hours";
   - `returnWeight` (3600 s): each return to a package already run, so a zone
     visit does what it can in one go (arriving a level later if need be) and
     the route comes back only when that clearly pays: chains through another
@@ -728,7 +733,9 @@ model, evaluator and search; what changes:
   cost: quests turned in, plus a fifth per other step (accepts and
   objectives lead to turn-ins elsewhere); every package up to the window's
   top (level + 4) is a candidate (low ones are cleanup), and it stops when no
-  package makes progress. Annealing is unchanged.
+  package makes progress. Annealing is unchanged but for the visit cap: a
+  return is a candidate while its package has run fewer than
+  `maxVisits(run)` times.
 - **Coverage report**, beside the result (`<result>-coverage.json` / `.md`,
   tools/lib/sim/completionist.js): per zone of the quest giver, eligible,
   routed, elite (optional in the guides) and missed, and every quest of the
@@ -743,9 +750,11 @@ model, evaluator and search; what changes:
   `category Completionist` guides for the Completionist pack
   (packs/completionist, pack id `completionist`, its own addon
   `PolestarPack_Completionist`, ids `completionist/<faction>/<race>/NN-…`)
-  (tools/lib/sim/completionist-guides.js): one per stretch of the route
-  (a zone visit with fewer than 6 accepts and turn-ins joins the guide
-  before it), steps per place and per kind of stop (quest givers named after
+  (tools/lib/sim/completionist-guides.js): one per stretch of the route (a
+  zone visit with 12 or more turn-ins starts a guide; a smaller one joins the
+  guide before it, unless that guide already spans 3 hours and the visit has
+  3 or more turn-ins; a zone with fewer than 6 goals is left out of the
+  guide's title), steps per place and per kind of stop (quest givers named after
   the NPC, objectives after the map area), objectives as `kill` / `collect`
   / `interact … quest Q.O` (the world's `objs`), `complete` for events at a
   quest's last site, every goal of an elite quest `optional` with the tip
@@ -755,4 +764,9 @@ model, evaluator and search; what changes:
   in the chain's first step to keep "Skip grey quests" off (the other
   starting zones are grey by the time the route gets there), and header
   comments (route, flow, optional elites, profession quests, dungeon quests
-  left to the Dungeons guides). `--limit N` writes the first N.
+  left to the Dungeons guides). A quest item that lasts only a while (items.json
+  `duration`: Durnan's Scalding Mornbrew) is followed straight on by the rest
+  of its quest, with a tip on how long it lasts, unless the route hearths
+  there; an item only vendors sell is a `buy … nearest`; an object the quest
+  has you /sit by or cast a racial at gets the quest's own words, not "Click".
+  `--limit N` writes the first N.

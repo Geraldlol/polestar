@@ -321,4 +321,26 @@ test('export: a timed quest item is followed by the rest of its quest (an escort
 		['A Wrecked Raft', ['accept 3844']],
 		["Marshal's Refuge", ['turnin 3844']],
 	]);
+	// The route hearths to the turn-in: left as it is (walking there is slower).
+	const viaInn = [
+		{ title: 'Nori', goals: [g('accept 3364', 3364)] },
+		{ title: 'Wolves', goals: [g('kill 9 quest 70.2', 70)] },
+		{ title: 'Back to Anvilmar', goals: [{ text: 'hearth "Anvilmar"' }] },
+		{ title: 'Durnan', goals: [g('turnin 3364', 3364)] },
+	];
+	assert.deepEqual(straightTurnins(viaInn, data).map((s) => s.title), ['Nori', 'Wolves', 'Back to Anvilmar', 'Durnan']);
+	// Two timed items from one step: both go straight on.
+	data.quests[71] = { id: 71, sourceItem: 50, objectives: [] };
+	const two = straightTurnins([
+		{ title: 'Nori', goals: [g('accept 3364', 3364), g('accept 71', 71)] },
+		{ title: 'Wolves', goals: [g('kill 9 quest 70.2', 70)] },
+		{ title: 'Durnan', goals: [g('turnin 3364', 3364)] },
+		{ title: 'Pond', goals: [g('turnin 71', 71)] },
+	], data);
+	assert.deepEqual(two.map((s) => [s.title, s.goals.map((x) => x.text)]), [
+		['Nori', ['accept 3364', 'accept 71']],
+		['Pond', ['turnin 71']],
+		['Durnan', ['turnin 3364']],
+		['Wolves', ['kill 9 quest 70.2']],
+	]);
 });

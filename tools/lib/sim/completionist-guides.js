@@ -122,8 +122,11 @@ function straightTurnins(steps, data, home = null) {
 		if (s.zone) cur = s.zone;
 		return { ...s, goals: s.goals.slice(), _z: cur };
 	});
+	const handled = new Set(); // getter goals already straightened
 	for (let s = 0; s < out.length; s++) {
 		for (const goal of out[s].goals.slice()) {
+			if (handled.has(goal)) continue;
+			handled.add(goal);
 			const m = /^(accept|collect|buy) (\d+)/.exec(goal.text || '');
 			if (!m) continue;
 			const item = m[1] === 'accept' ? (data.quests[m[2]] || {}).sourceItem : Number(m[2]);
@@ -144,14 +147,19 @@ function straightTurnins(steps, data, home = null) {
 				if (!mine.length) continue;
 				moved.push({ ...out[k], goals: mine });
 			}
-			// Already straight on: nothing else between.
-			const others = out.slice(s + 1, at.k + 1).some((x) => x.goals.some((y) => y.q !== q));
+			// Already straight on: nothing else between. A hearthstone on the
+			// way is the route's own quick way there: the walk would be slower.
+			const between = out.slice(s + 1, at.k + 1);
+			if (between.some((x) => x.goals.some((y) => /^hearth\b/.test(y.text || '')))) continue;
+			const others = between.some((x) => x.goals.some((y) => y.q !== q));
 			if (!others) continue;
 			for (let k = s + 1; k <= at.k; k++) out[k].goals = out[k].goals.filter((x) => x.q !== q);
 			const mins = Math.max(1, Math.round(it.duration / 60));
 			moved[0].goals[0] = { ...moved[0].goals[0], tip: `${it.name} lasts ${mins} minute${mins === 1 ? '' : 's'}: go straight on with it.` };
 			out.splice(s + 1, 0, ...moved);
-			s += moved.length;
+			// Scan this step again for its other timed items: this one's goals
+			// now follow straight on, so it is left as is.
+			s--;
 			break;
 		}
 	}
