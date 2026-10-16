@@ -71,12 +71,18 @@ function eliteTargets(raw, data) {
 	return out;
 }
 
-// The step tip for an elite target: the house wording (validate.js
-// eliteTip), with its level so a player can tell whether to group.
-function eliteTip(t) {
-	return t.level
-		? `${t.name} (level ${t.level}) is elite: grouping up is advised unless you are well above level ${t.level.split('-').pop()}.`
-		: `${t.name} is elite: grouping up is advised.`;
+// The step tip for its elite targets: the house wording (validate.js
+// eliteTip), with their levels so a player can tell whether to group; one
+// sentence for several ("A (level 35-36) and B (level 37) are elite: …
+// well above level 37."), naming three at most (a camp of six Moonrage
+// worgen reads "…, Moonrage Elder (level 14-15) and 3 more are elite").
+function eliteTip(targets) {
+	const named = targets.slice(0, targets.length > 4 ? 3 : 4).map((t) => (t.level ? `${t.name} (level ${t.level})` : t.name));
+	if (targets.length > named.length) named.push(`${targets.length - named.length} more`);
+	const list = named.length > 1 ? `${named.slice(0, -1).join(', ')} and ${named[named.length - 1]}` : named[0];
+	const top = Math.max(0, ...targets.map((t) => (t.level ? Number(t.level.split('-').pop()) : 0)));
+	const be = targets.length > 1 ? 'are' : 'is';
+	return top ? `${list} ${be} elite: grouping up is advised unless you are well above level ${top}.` : `${list} ${be} elite: grouping up is advised.`;
 }
 
 // Goal lines for one executed step. -> [{ text, optional, elite: [{ name, level }] }]
@@ -372,9 +378,13 @@ function completionistGuides({ world, run, data, entries, meta, place, coverage 
 		// the route gets there, so "Skip grey quests" would skip them silently.
 		const greyTip = 'Every quest counts here, grey ones too: keep Options > Automation > "Skip grey quests" off.';
 		kept.forEach((s, k) => {
-			L.push('', `step ${s.title}`);
+			// A title is the rest of the line, but the parser reads quotes
+			// (an item called One "Gerenzo", of Stonetalon).
+			L.push('', `step ${s.title.replace(/"/g, "'")}`);
 			if (s.zone) L.push(`  zone ${s.zone}`);
-			const tips = [...new Set(s.goals.flatMap((x) => (x.elite || []).map(eliteTip)))];
+			const elites = [];
+			for (const t of s.goals.flatMap((x) => x.elite || [])) if (!elites.some((e) => e.name === t.name)) elites.push(t);
+			const tips = elites.length ? [eliteTip(elites)] : [];
 			for (const x of s.goals) if (x.tip && !tips.includes(x.tip)) tips.push(x.tip);
 			if (i === 0 && k === 0) tips.unshift(greyTip);
 			if (tips.length) L.push(`  tip ${tips.join(' ')}`);
