@@ -9,7 +9,8 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
 const { buildWorld } = require('../tools/lib/sim/world');
-const { compileRun, makeTables, K_TURNIN } = require('../tools/lib/sim/run');
+const { compileRun, makeTables, sliceOrder, K_TURNIN } = require('../tools/lib/sim/run');
+const { planOrder } = require('../tools/lib/sim/tour');
 const { Evaluator, SHARE } = require('../tools/lib/sim/evaluate');
 const { construct } = require('../tools/lib/sim/search');
 const { Rng } = require('../tools/lib/sim/rng');
@@ -103,6 +104,31 @@ test('completionist packages follow each zone\'s own level tiers: a quest more t
 	const bw = buildWorld(big, { faction: 'Horde', bandWidth: 5, extraStarts: syn.START, variant: 'completionist' });
 	const holding = bw.packages.filter((p) => p.quests.some((id) => id >= 980 && id < 1005));
 	assert.equal(holding.filter((p) => p.zone === VALE).length, 1);
+});
+
+test('a completionist zone visit is walked by level: its 1-5 quests before its 6-10 ones, chains in their prerequisite\'s slice or later', () => {
+	// Points on a line: the level 7 hub (x 0) sits between the start and the
+	// level 1 camp (x 100); a single tour from the hub does the level 7 quest
+	// first. 12 (level 3) follows 11 (level 8): a chain keeps its order.
+	const at = (x) => x;
+	const step = (q, kind, x, quest = {}) => ({ kind, q, task: kind === 'task' ? 0 : -1, pt: at(x), quest: { pre: [], ...quest } });
+	const sub = [
+		step(7, 'accept', 0), step(7, 'task', 1), step(7, 'turnin', 0),
+		step(8, 'accept', 2), step(8, 'turnin', 2),
+		step(1, 'accept', 100), step(1, 'task', 101), step(1, 'turnin', 100),
+		step(11, 'accept', 3), step(11, 'turnin', 3),
+		step(12, 'accept', 104, { pre: [11] }), step(12, 'turnin', 104, { pre: [11] }),
+	];
+	const levels = { 7: 7, 8: 7, 1: 1, 11: 8, 12: 3 };
+	const worldById = new Map(Object.entries(levels).map(([id, l]) => [Number(id), { minLevel: l }]));
+	const dist = (a, b) => Math.abs(a - b);
+	const order = sliceOrder(sub, worldById, 5, dist).map((s) => `${s.kind} ${s.q}`);
+	const pos = (x) => order.indexOf(x);
+	assert.ok(pos('turnin 1') < pos('accept 7') && pos('turnin 1') < pos('accept 8'), order.join(', '));
+	assert.ok(pos('turnin 11') < pos('accept 12'), order.join(', '));
+	// Without slices the nearest-neighbour tour starts at the level 7 hub.
+	const flat = planOrder(sub, { dist }).map((s) => `${s.kind} ${s.q}`);
+	assert.ok(flat.indexOf('accept 7') < flat.indexOf('accept 1'));
 });
 
 test('eligible set: one quest of a two-way exclusive choice (most dependents, then reward, then id), one-way exclusions stay; class quests left to the Class guides', () => {

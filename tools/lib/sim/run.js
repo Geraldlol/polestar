@@ -86,6 +86,38 @@ function onIsle(world, q) {
 // races' starting islands); see docs/SIMULATION.md "Starts".
 const HOME_LEVEL = 10;
 
+// A completionist package is one zone visit over a tier of up to 8 levels
+// (world.js), too wide for one tour: Durotar 1-10 toured as one sent a level
+// 1 Orc to Razor Hill before the Valley of Trials. So it is walked in slices
+// of `width` levels by its quests' minimum levels, each slice toured on its
+// own (planOrder); a quest goes no earlier than the slice of a prerequisite or
+// parent here, so chains keep their order across slices.
+function sliceOrder(sub, worldById, width, dist) {
+	const sliceOf = new Map();
+	for (const s of sub) {
+		const wq = worldById.get(s.q);
+		sliceOf.set(s.q, Math.floor((Math.max(1, wq.minLevel || wq.level || 1) - 1) / width));
+	}
+	for (let pass = 0; pass < 4; pass++) {
+		for (const s of sub) {
+			let v = sliceOf.get(s.q);
+			for (const p of s.quest.pre) if (sliceOf.has(p)) v = Math.max(v, sliceOf.get(p));
+			if (s.quest.inLog != null && sliceOf.has(s.quest.inLog)) {
+				v = Math.max(v, sliceOf.get(s.quest.inLog));
+				sliceOf.set(s.quest.inLog, v);
+			}
+			sliceOf.set(s.q, v);
+		}
+	}
+	const slices = new Map();
+	for (const s of sub) {
+		const v = sliceOf.get(s.q);
+		if (!slices.has(v)) slices.set(v, []);
+		slices.get(v).push(s);
+	}
+	return [...slices.keys()].sort((a, b) => a - b).flatMap((v) => planOrder(slices.get(v), { dist }));
+}
+
 // family: 'solo' (no dungeons), 'dungeons' (dungeon packages and their
 // quests allowed) or 'completionist' (every quest open to the character, on
 // the completionist world: docs/SIMULATION.md "Completionist"; no dungeons).
@@ -328,7 +360,7 @@ function compileRun(world, { race, cls = null, raceBits = {}, family = 'solo' } 
 		}
 		// Nothing earns XP here; a completionist route still needs the accepts.
 		if (!sub.length || (!completionist && !sub.some((s) => s.k === K_TURNIN || s.k === K_TASK))) continue;
-		const steps = planOrder(sub, { dist: wdist }).map((s) => [s.k, s.qi, s.k === K_TASK ? qTask0[s.qi] + s.task : s.k === K_ACCEPT ? qAccept[s.qi] : -1, usePt(s.pt)]);
+		const steps = (completionist ? sliceOrder(sub, worldById, world.bandWidth || 5, wdist) : planOrder(sub, { dist: wdist })).map((s) => [s.k, s.qi, s.k === K_TASK ? qTask0[s.qi] + s.task : s.k === K_ACCEPT ? qAccept[s.qi] : -1, usePt(s.pt)]);
 		pkgStart.push(sKind.length);
 		for (const s of steps) {
 			sKind.push(s[0]);
@@ -494,5 +526,5 @@ function makeTables(run, p) {
 }
 
 module.exports = {
-	compileRun, makeTables, questOpen, onIsle, raceBit, popcount, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY, NEAR_K, MOBL,
+	compileRun, makeTables, sliceOrder, questOpen, onIsle, raceBit, popcount, K_ACCEPT, K_TASK, K_TURNIN, K_GRIND, K_DUNGEON, W_KILL, W_USE, W_ESCORT, W_BUY, NEAR_K, MOBL,
 };
