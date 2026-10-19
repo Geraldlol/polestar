@@ -2368,6 +2368,8 @@ local function build()
 	end, 12)
 	hoverable(strip.Add)
 	chrome[#chrome + 1] = strip
+	-- The Forever skin positions its border below the tab strip; expose the strip.
+	F.psStrip = strip
 
 	-- Navigator: prev, "8 / 29", next on the left; Skip, the bug (report a
 	-- problem) and the menu on the right.

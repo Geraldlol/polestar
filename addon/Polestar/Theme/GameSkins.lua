@@ -548,15 +548,20 @@ end
 -- The guide window (and the toasts, psLight).
 local GUIDE = {
 	forever = function(f, kit)
-		body(f, 0, 0, 0, 0.96 * opacity(f), 3)
-		-- The micro menu box's bronze line (55 units, its chamfered corners
-		-- 12), the line 3 units in from the art's edge: laid 3 out so it runs
-		-- on the window's edge. Its filled middle is left out: the body is
-		-- the window's own.
+		body(f, 0, 0, 0, 0.96 * opacity(f))
+		-- The micro menu box's bronze line (55 units, its chamfered corners 12),
+		-- the line 3 units in from the art's edge: laid 3 out so it runs on the
+		-- window's edge. Its filled middle is left out: the body is the window's own.
+		-- The border frame starts below the tab strip (f.psStrip) so the strip
+		-- draws above the border (not covered by the f+6 edge frame).
+		local stripH = f.psStrip and f.psStrip:GetHeight() or 0
+		if stripH < 1 then stripH = 0 end
 		local o = child(f, "edge", 6)
 		o:EnableMouse(false)
-		o:SetAllPoints(f)
-		sliced(f, "slim", kit, kit.slim, o, { 3, 3, 3, 3 }, "BORDER", 0, true)
+		o:ClearAllPoints()
+		o:SetPoint("TOPLEFT", f, "TOPLEFT", 0, -stripH)
+		o:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+		sliced(f, "slim", kit, kit.slim, o, { 3, 0, 3, 3 }, "BORDER", 0, true)
 	end,
 	blizzard = function(f)
 		local a = opacity(f)
@@ -1135,12 +1140,20 @@ function Theme.KitStatus(b)
 		if f then b:SetStatusBarTexture(f); fill = b:GetStatusBarTexture(); fill:SetTexCoord(l, r, tp, bt) end
 		fill:SetVertexColor(1, 1, 1, 1)
 		draw(b.Bg, kit, kit.status.bg)
+		-- Frame the bar with the nine-slice art. The host sits on the bar's own
+		-- bounds; out = the slice margins so every piece extends OUTSIDE the bar,
+		-- leaving the fill fully visible in the centre.
+		local _, _, _, _, _, fw, fh = region(kit, kit.status.frame)
+		local sm = ns.GameArtSlice and ns.GameArtSlice[kit.status.frame]
+		local sl = sm and sm[1] or 0
+		local st = sm and sm[2] or 0
+		local sr = sm and sm[3] or 0
+		local sb = sm and sm[4] or 0
 		local o = child(b, "statusFrame", 2)
 		o:EnableMouse(false)
 		o:ClearAllPoints()
-		o:SetPoint("TOPLEFT", b, "TOPLEFT", -7, 6)
-		o:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 7, -7)
-		sliced(b, "statusArt", kit, kit.status.frame, o, nil, "ARTWORK", 0, true)
+		o:SetAllPoints(b)
+		sliced(b, "statusArt", kit, kit.status.frame, o, { sl, st, sr, sb }, "ARTWORK", 0, true)
 	elseif kit.source == "retail" then
 		b:SetStatusBarTexture(CLASSIC.statusFill[1])
 		fill = b:GetStatusBarTexture()

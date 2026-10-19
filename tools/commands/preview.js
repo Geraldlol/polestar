@@ -867,6 +867,16 @@ const SCENES = [
 		],
 	},
 	{
+		file: 'skins-game.svg',
+		title: 'Game skins: the guide window in Forever, Blizzard Style and Classic WoW UI',
+		backdrop: 'terrain',
+		panels: [
+			{ roots: GUIDE, script: `Polestar.Set("ui.skin", "forever"); ${TABS}` },
+			{ roots: GUIDE, script: `Polestar.Set("ui.skin", "blizzard"); ${TABS}` },
+			{ roots: GUIDE, script: `Polestar.Set("ui.skin", "classic"); ${TABS}` },
+		],
+	},
+	{
 		file: 'skins-states.svg',
 		title: 'Skins: a hub step, transparent and the header menu, in Halo and Hearth',
 		backdrop: 'terrain',
