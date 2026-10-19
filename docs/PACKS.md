@@ -18,8 +18,8 @@ built from a pack: a folder with a `pack.json` and `.guide` files.
 |---|---|
 | **Get going** | [Setup](#setup) · [A first pack in 15 minutes](#a-first-pack-in-15-minutes) |
 | **Write guides** | [By playing](#by-playing) · [From the simulator](#from-the-simulator) · [By hand](#by-hand) · [With an AI assistant](#with-an-ai-assistant) |
-| **Ship it** | [Testing](#testing) · [Publishing](#publishing) · [Updating](#updating) |
-| **Fix a problem** | [In game: statuses and problems](#in-game-statuses-and-problems) · [Lint messages](#lint-messages) |
+| **Ship it** | [Testing](#testing) · [Publishing](#publishing) · [One guide as an import string](#one-guide-as-an-import-string) · [Updating](#updating) |
+| **Fix a problem** | [In game: statuses and problems](#in-game-statuses-and-problems) · [Import strings that are turned down](#import-strings-that-are-turned-down) · [Lint messages](#lint-messages) |
 | **Reference** | [Where things are](#where-things-are) |
 
 ## Setup
@@ -340,6 +340,46 @@ with Leveling guides are offered there. With your pack picked, Polestar's
 guides still fill in wherever yours have nothing for the character (another
 race, another level range).
 
+### One guide as an import string
+
+A single small guide (a quest chain, an item, a mount, an errand) can go to
+players as one line of text instead of a zip. They paste it on Polestar's
+Import page (`/polestar import`, or **Import** above Options in the hub);
+nothing to install, no restart.
+
+```sh
+polestar lint && polestar playtest            # the same checks as for an addon
+polestar export guides/cozy-sleeping-bag.guide > cozy.txt
+```
+
+Share the line in `cozy.txt` on Discord, GitHub, a forum or your listing.
+
+- The guide stays in your pack: `export` finds the `pack.json` above the
+  file, and the guide id starts with your pack id
+  (`yendi/cozy-sleeping-bag`). The string carries your pack's `license`; its
+  author is the guide's `author`, else the pack's.
+- `export` lints the pack first and refuses a guide with errors. It prints
+  only the string on stdout.
+- Limits: 60 steps, 100 goals per step, 128 candidates per goal, 50,000
+  characters for the string. A bigger guide, or a set of guides, is a
+  community addon.
+- A `next` or route choice may lead only to one of Polestar's guides or a
+  guide the player has already imported; `export` names the guides to import
+  first.
+- Pictures (`image` lines) are not carried: an imported guide shows none.
+- In `polestar play <pack>` (and `polestar dev --play`), **Copy import
+  string** beside the guide picker gives the string of the guide picked.
+
+**Updating** an import string: raise the guide's `version`, export again and
+share the new line. Players paste it and press **Update**; their progress
+stays where the steps did not change. Keep the guide id.
+
+The comparison with a community addon is in [GUIDE_PACKS.md, "Import
+strings"](GUIDE_PACKS.md#import-strings); the string's format in
+[PACK_FORMAT.md, "Import strings"](PACK_FORMAT.md#import-strings). Strings
+are covered by the same [licence exception](../LICENSE-EXCEPTION.md) as
+community addons.
+
 ## Updating
 
 - Change the guides, raise `version`, run `polestar pack` and upload.
@@ -398,6 +438,30 @@ Below the list, **Suggest guides from** picks where suggestions come from
 words what a community addon is, with a **Read more:** link to
 [GUIDE_PACKS.md](GUIDE_PACKS.md). A pack's website and that link open the
 copy window, with the address selected to copy.
+
+### Import strings that are turned down
+
+The Import page reads a pasted string and shows what it holds before
+anything is saved. A string it cannot take is turned down with one of these
+messages, and nothing is saved:
+
+| Message | Fix |
+|---|---|
+| This is not a Polestar import string. / This import string is damaged or incomplete. Copy the whole string again. | the player copied part of the line, or something else: copy the whole line again (spaces and line breaks in it are fine; Polestar drops them) |
+| This import string needs a newer Polestar. / This import string holds a field Polestar does not read (<field>). It may need a newer Polestar. | the player updates Polestar; if they already have the latest, rebuild the string with an updated clone |
+| This import string is too long: Polestar reads up to 50000 characters. / This import string holds too much: Polestar reads up to 256 KB of guide data. | split the guide, or publish it as a community addon |
+| Its guide has <n> steps; an import string holds 60 at most. A bigger guide comes as a community addon. / Its guide has <n> goals in step <s>; an import string holds 100 per step at most. / Its guide has <n> candidates in a goal; an import string holds 128 per goal at most. | shorten the guide or the step, or publish a community addon |
+| This import string holds a text longer than Polestar reads (<field>): 4096 characters at most. | shorten that tip or text |
+| Its guide id <id> must start with its author's own id, as in yendi/cozy-sleeping-bag. | start the guide id with your pack id and export again |
+| Guides under <id>/ come from the community addon <addon>, which is installed. | that id belongs to an installed addon: pick a pack id of your own |
+| It leads on to <id>, which is neither one of Polestar's guides nor an imported one: import that guide first. | the player imports that guide first (`export` lists them), or drop the `next` |
+| Guide <id> was refused: <reason>. / Its guide has a spot coordinate outside 0-100. (and the other map-frame and coordinate messages) / Its guide has more than one direct turn-in for quest <q> in step <s>. | the guide breaks a rule a community addon's guide would too (PACK_FORMAT.md, "Rules Polestar enforces"): fix it, lint, export again. `polestar export` never writes such a string |
+| This import string holds no guide. | export again with `polestar export <file.guide>` |
+| This game client cannot read import strings. | the client lacks the decoding Polestar needs (`C_EncodingUtil`): publish a community addon for that client |
+
+`/polestar import delete <guide-id>` removes one imported guide, and
+`/polestar import clear` removes them all; the Import page's **Delete**
+buttons do the same.
 
 ## Lint messages
 
