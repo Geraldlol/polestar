@@ -81,29 +81,16 @@ step Thurman Schneider
 
 step Grimand Elmore
   accept 353
-  turnin 92748
-  accept 92749
-
-step near Stormwind: A Dynamite Plan
-  complete 92749
 
 step Sprite Jumpsprocket
-  turnin 92749
-  accept 92750
   turnin 1338
 
 step Osric Strang
   turnin 6281
-  turnin 92750
-  accept 92751
 
 step Elaine Trias
   accept 97222
   turnin 97222
-
-step Sprite Jumpsprocket
-  turnin 92751
-  accept 92752
 
 step Manifest Clerk Philmor
   accept 97220

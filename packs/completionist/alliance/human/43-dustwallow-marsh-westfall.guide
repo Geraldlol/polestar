@@ -134,13 +134,6 @@ step Hemet Nesingwary
 step Sentinel Hill
   zone Westfall
   sethome "Sentinel Hill"
-  turnin 92752
-  accept 92753
-
-step Alba Fairmoon
-  turnin 92753
-  accept 92819
-  turnin 92819
 
 step Alexston Farmstead: Humble Beginnings
   complete 399

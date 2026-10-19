@@ -27,15 +27,6 @@ next completionist/alliance/human/05-the-barrens
 
 step Scout Galiaan
   accept 153
-  accept 92742
-  accept 92744
-  accept 92745
-
-step Sentinel Hill: Testing the Wells
-  complete 92742
-
-step Alba Fairmoon
-  turnin 92742
 
 step Gryan Stoutmantle
   accept 12
@@ -105,9 +96,8 @@ step Saldean's Farm: Goretusk Snout and Stringy Vulture Meat
   collect 731 quest 38.3
   collect 729 quest 38.1
 
-step Jangolode Mine: Gnoll Paw and Kobold Digger
+step Jangolode Mine: Gnoll Paw
   collect 725 quest 102.1
-  kill 1236 quest 92745.1
 
 step Furlbrow's Pumpkin Farm: The Forgotten Heirloom
   complete 64
@@ -148,12 +138,8 @@ step Gold Coast Quarry
   collect 255155 x1
   accept 92910
 
-step Gold Coast Quarry: Riverpaw Miner and Murloc Warrior
-  kill 1426 quest 92745.2
+step Gold Coast Quarry: Murloc Warrior
   kill 171 quest 152.2
-
-step Gold Coast Quarry: Longshore Murloc Gill
-  collect 254548 quest 92744.1
 
 step Jangolode Mine: Murloc Coastrunner
   kill 126 quest 152.1
@@ -164,14 +150,6 @@ step Ozwin Ironsprocket
 step Gryan Stoutmantle
   turnin 13
   accept 14
-
-step Alba Fairmoon
-  turnin 92744
-  turnin 92745
-  accept 92747
-
-step Moonbrook: Suspicious Industrial Supplies
-  collect 254676 quest 92747.1
 
 step Demont's Place: Defias Pathstalker and Defias Knuckleduster
   kill 121 quest 14.2
@@ -186,10 +164,6 @@ step Back to Sentinel Hill
 
 step The Dagger Hills: Defias Highwayman
   kill 122 quest 14.1
-
-step Alba Fairmoon
-  turnin 92747
-  accept 92748
 
 step Gryan Stoutmantle
   turnin 14
