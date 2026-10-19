@@ -170,11 +170,12 @@ lands; until then a result exists only where you ran the simulator yourself
 (docs/SIMULATION.md).
 
 Polestar's own Completionist pack (packs/completionist in the repository,
-the `PolestarPack_Completionist` addon) is built this way, and is a working
-example of a large pack: about 500 guides from
-`sim run --objective completionist` and `sim export` (whose completionist
-export writes ids under the pack's prefix itself), linted, played and zipped
-with the same `lint`, `playtest` and `pack` commands as any other pack.
+the `PolestarPack_Completionist` addon) was made this way, and is a working
+example of a large pack: about 500 guides exported from a completionist
+route (every quest a race can take) of an earlier simulator, linted, played
+and zipped with the same `lint`, `playtest` and `pack` commands as any other
+pack. Today's simulator has no completionist objective, so its guides are
+fixed by hand like any other pack's until it gets one.
 
 ### By hand
 

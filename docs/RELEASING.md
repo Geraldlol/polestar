@@ -26,9 +26,9 @@ see docs/PACKS.md. Our own Completionist pack is one of them, released on its
 own: `node tools/polestar.js pack packs/completionist` writes
 `packs/completionist/dist/PolestarPack_Completionist-<version>.zip` (the
 version in `packs/completionist/pack.json`, raised when its guides change).
-Its guides are the simulator's completionist routes (docs/SIMULATION.md §10):
-regenerated with `sim run --objective completionist` and `sim export`, not
-edited by hand.
+Its guides were exported from an earlier simulator's completionist routes
+(docs/PACKS.md, "From the simulator"); today's simulator cannot regenerate
+them, so they are fixed by hand.
 
 ## Version
 
