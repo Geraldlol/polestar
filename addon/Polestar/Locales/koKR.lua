@@ -1084,6 +1084,7 @@ L["Legacy"] = "유산"
 L["Collectibles"] = "수집품"
 L["Sections"] = "섹션"
 L["guide status: Completed"] = "완료됨"
+L["Completionist"] = "모든 퀘스트"
 
 -- UI/Lookup.lua
 L["Companion"] = "애완동물"

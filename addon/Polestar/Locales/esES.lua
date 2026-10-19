@@ -1084,6 +1084,7 @@ L["Legacy"] = "Legado"
 L["Collectibles"] = "Coleccionables"
 L["Sections"] = "Secciones"
 L["guide status: Completed"] = "Completada"
+-- L["Completionist"] = ""
 
 -- UI/Lookup.lua
 L["Companion"] = "Mascota de compañía"

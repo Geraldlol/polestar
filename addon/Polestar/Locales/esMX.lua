@@ -1507,6 +1507,7 @@ L["Collectibles"] = "Coleccionables"
 L["Why"] = "Por qué"
 L["Sections"] = "Secciones"
 L["guide status: Completed"] = "Completada"
+-- L["Completionist"] = ""
 
 -- UI/Report.lua
 L["Polestar %s"] = "Polestar %s"
