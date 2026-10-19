@@ -14,6 +14,7 @@ const { parseCount, parseProgressText } = require('../tools/lib/data/objectives'
 const { reduceSpawns } = require('../tools/lib/data/spawns');
 const { buildData } = require('../tools/lib/data/build');
 const { checkLicense } = require('../tools/lib/data/pfquest');
+const { loadWebXp } = require('../tools/lib/data/webxp');
 const { tmpdir } = require('./helpers/tmp');
 
 const FIX = path.join(__dirname, 'fixtures', 'data');
@@ -413,6 +414,14 @@ describe('fixture build', () => {
 		fs.writeFileSync(path.join(dir, 'LICENSE'), 'All rights reserved.\n');
 		assert.throws(() => checkLicense(dir), /not the MIT license/);
 		assert.equal(checkLicense(path.join(FIX, 'pfquest')).license, 'MIT');
+	});
+	test('a quest XP site that never answers fails its lookups instead of stalling the build', { timeout: 5000 }, async () => {
+		const sourcesDir = tmpdir('polestar-data-');
+		const silent = (url, { signal } = {}) => new Promise((resolve, reject) => signal && signal.addEventListener('abort', () => reject(signal.reason)));
+		const r = await loadWebXp({ sourcesDir, ids: [101, 102], fetchImpl: silent, timeout: 50 });
+		assert.equal(r.xp.size, 0);
+		assert.match(r.warnings.join('\n'), /sitemap/);
+		assert.match(r.warnings.join('\n'), /quest 101 XP lookup/);
 	});
 });
 

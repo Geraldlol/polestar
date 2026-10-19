@@ -1475,11 +1475,19 @@ end
 
 -- isBagCount: see computeCurrent above.
 
-local function latchInStep(s)
+-- Latch step s's met bag counts and, when s is the live step (`live`), its
+-- flights and hearths that landed: walking out of the arrival's subzone, or
+-- through Rut'theran's portal, must not send the player back to the flight
+-- master while the step's other goals are open (#362). Only the live step's:
+-- looking ahead at a step while standing at its flight's end is no landing.
+-- Unlike bag counts they are kept when the step is left backwards (the
+-- player did land).
+local function latchInStep(s, live)
 	local step = guide.steps[s]
 	if not stepApplies(step) then return end
 	for g, goal in ipairs(step.goals) do
-		if isBagCount(goal) and goalApplies(goal) and not checked(s, g) and goalDone(s, g, goal) then
+		local t = goal.t
+		if (isBagCount(goal) or (live and (t == "fly" or t == "hearth"))) and goalApplies(goal) and not checked(s, g) and goalDone(s, g, goal) then
 			manualFor(guide.id, true)[s .. ":" .. g] = true
 		end
 	end
@@ -2857,7 +2865,8 @@ local function evaluateLoaded(active)
 	-- Bag-count goals already met in the step about to be (or still) current
 	-- stay met for the rest of it, even if the items get used up (crafted,
 	-- handed in) before the step's other goals are done.
-	if newCurrent then latchInStep(newCurrent) end
+	if newCurrent then latchInStep(newCurrent, newCurrent == computed) end
+	if pin and computed then latchInStep(computed, true) end
 	if changed then
 		-- The computed step moved past a step whose quests became unavailable
 		-- (not offered at the giver, or closed for good): say which and why,

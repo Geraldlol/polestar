@@ -149,8 +149,44 @@ test('secure buttons: changes during combat wait for PLAYER_REGEN_ENABLED; displ
 		q.combat(false)
 		emit({ b:GetAttribute("item"), t:GetAttribute("macrotext"), b:GetScale(), b.itemID, b.Count:GetText() })
 	`);
-	assert.deepEqual(out[0], ['item:900', '/targetexact Murloc', 1, 900]);
-	assert.deepEqual(out[1], ['item:903', '/targetexact Gnoll', 1.4, 903, '4']);
+	assert.deepEqual(out[0], ['item:900', '/cleartarget [nocombat]\n/targetexact Murloc\n/cleartarget [dead]', 1, 900]);
+	assert.deepEqual(out[1], ['item:903', '/cleartarget [nocombat]\n/targetexact Gnoll\n/cleartarget [dead]', 1.4, 903, '4']);
+});
+
+test('secure buttons: the name sits on the chosen side of every button', () => {
+	const out = run(`
+		local function side(b) local p, _, rp, x, y = b.Label:GetPoint(1); return { p, rp, x, y } end
+		local all = { PolestarQuestItemButton, PolestarTargetButton, PolestarHearthButton }
+		for _, v in ipairs({ "right", "left", "above", "below", "nonsense" }) do
+			set("buttonTextSide", v)
+			emit({ side(all[1]), side(all[2]), side(all[3]) })
+		end
+	`);
+	const at = (p, rp, x, y) => [[p, rp, x, y], [p, rp, x, y], [p, rp, x, y]];
+	assert.deepEqual(out[0], at('LEFT', 'RIGHT', 8, 0));
+	assert.deepEqual(out[1], at('RIGHT', 'LEFT', -8, 0));
+	assert.deepEqual(out[2], at('BOTTOM', 'TOP', 0, 4));
+	assert.deepEqual(out[3], at('TOP', 'BOTTOM', 0, -4));
+	assert.deepEqual(out[4], at('LEFT', 'RIGHT', 8, 0), 'an unknown value falls back to the right');
+});
+
+test('secure buttons: an Above name sits over a quest item button shown above the target button', () => {
+	const out = run(`
+		local t = PolestarTargetButton
+		local function over() local _, rel = t.Label:GetPoint(1); return rel and rel:GetName() end
+		set("buttonTextSide", "above")
+		q.step({ { t = "kill", target = "Murloc" } })
+		emit({ over() })
+		q.items[900] = { name = "Torch" }
+		q.addItem(0, 1, 900, 1)
+		q.step({ { t = "use", item = 900, quest = 7 }, { t = "kill", target = "Murloc" } })
+		emit({ over() })
+		q.step({ { t = "kill", target = "Gnoll" } })
+		emit({ over() })
+	`);
+	assert.deepEqual(out[0], ['PolestarTargetButton']);
+	assert.deepEqual(out[1], ['PolestarQuestItemButton'], 'clear of the quest item button, not in the gap under it');
+	assert.deepEqual(out[2], ['PolestarTargetButton'], 'back on the target button once the item button goes');
 });
 
 test('secure buttons: a login under combat lockdown (/reload mid-fight) defers every protected call', () => {
@@ -189,7 +225,7 @@ test('quest item button: range tint and cooldown follow the item', () => {
 	assert.deepEqual(cd, [50, 10]);
 });
 
-test('target button: kill targets and QuestDB droppers, preferred name last, each click cycles', () => {
+test('target button: kill targets and QuestDB droppers, preferred name first, each click cycles', () => {
 	const out = run(`
 		local t = PolestarTargetButton
 		q.step({
@@ -218,13 +254,61 @@ test('target button: kill targets and QuestDB droppers, preferred name last, eac
 		q.step({ { t = "goto", map = 9000, x = 1, y = 1 } })
 		emit({ t:GetAttribute("macrotext") or "nil", t:IsShown() })
 	`);
-	assert.equal(out[0], '/targetexact Kobold Vermin');
-	assert.deepEqual(out[1], ['macro', '/targetexact Kobold Laborer\n/targetexact Kobold Vermin', 'Kobold Vermin']);
+	assert.equal(out[0], '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]');
+	assert.deepEqual(out[1], ['macro', '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]\n/targetexact [noexists] Kobold Laborer\n/cleartarget [dead]', 'Kobold Vermin']);
 	assert.equal(out[2], out[1][1]);
-	assert.deepEqual(out[3], ['/targetexact Kobold Vermin\n/targetexact Kobold Laborer', 'Kobold Laborer']);
+	assert.deepEqual(out[3], ['/cleartarget [nocombat]\n/targetexact Kobold Laborer\n/cleartarget [dead]\n/targetexact [noexists] Kobold Vermin\n/cleartarget [dead]', 'Kobold Laborer']);
 	assert.equal(out[4], out[3][0], 'no macro change in combat');
-	assert.equal(out[5], '/targetexact Kobold Laborer\n/targetexact Kobold Vermin', 'cycled once combat ended');
+	assert.equal(out[5], '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]\n/targetexact [noexists] Kobold Laborer\n/cleartarget [dead]', 'cycled once combat ended');
 	assert.deepEqual(out[6], ['nil', false]);
+});
+
+test('target button: a collect names the mobs the arrow leads to first (#356), then the item\'s droppers', () => {
+	const out = run(`
+		local B = Polestar.QoL.Buttons
+		local t = PolestarTargetButton
+		local function names()
+			local out = {}
+			for i, n in ipairs(B.TargetNames()) do out[i] = n end
+			return out
+		end
+		Polestar.QuestDB = {
+			IsLoaded = function() return true end,
+			-- The item's droppers, ranked by drop chance over the whole world:
+			-- none of Small Spider Leg's best five is in Teldrassil.
+			GetObjectiveMobs = function(quest, oi) if quest == 7 and oi == 1 then return { "Mother Fang", "Cliff Lurker", "Mist Creeper" } end end,
+			GetItemDroppers = function(item) if item == 5465 then return { { name = "Mother Fang" }, { name = "Cliff Lurker" } } end end,
+		}
+		Polestar.Fire("QUESTDB_LOADED")
+		stub.runTimers()
+		-- The guide's own sources for this point come first, the one the point
+		-- belongs to leading; the item's droppers follow.
+		q.step({ { t = "collect", item = 5465, itemName = "Small Spider Leg", quest = 7, oi = 1,
+			fromNpcs = { { npc = 1998, npcName = "Webwood Lurker" }, { npc = 2001, npcName = "Giant Webwood Spider" } } } })
+		emit({ names(), t.Label:GetText() })
+		-- A farm spot the engine chose (\`collect … nearest\`) comes before them.
+		q.step({ { t = "collect", item = 5465, itemName = "Small Spider Leg", npc = 30, npcName = "Forest Spider",
+			fromNpcs = { { npc = 1998, npcName = "Webwood Lurker" } } } })
+		emit({ names(), t.Label:GetText() })
+		-- Without either, the item's droppers alone, as before.
+		q.step({ { t = "collect", item = 5465, itemName = "Small Spider Leg", quest = 7, oi = 1 } })
+		emit({ names(), t.Label:GetText() })
+		-- A name a guide pack could use to smuggle a second macro line is passed over.
+		q.step({ { t = "collect", item = 5465, itemName = "Small Spider Leg",
+			fromNpcs = { { npc = 1998, npcName = "Webwood Lurker\\n/run X()" }, { npc = 2001, npcName = "Giant Webwood Spider" } } } })
+		emit({ names(), t:GetAttribute("macrotext") })
+		-- Without the quest database the guide's own sources still name the mobs.
+		Polestar.QuestDB = nil
+		q.step({ { t = "collect", item = 5465, itemName = "Small Spider Leg", quest = 7, oi = 1,
+			fromNpcs = { { npc = 1998, npcName = "Webwood Lurker" } } } })
+		emit(names())
+	`);
+	assert.deepEqual(out[0], [['Webwood Lurker', 'Giant Webwood Spider', 'Mother Fang', 'Cliff Lurker', 'Mist Creeper'], 'Webwood Lurker']);
+	assert.deepEqual(out[1], [['Forest Spider', 'Webwood Lurker', 'Mother Fang', 'Cliff Lurker'], 'Forest Spider']);
+	assert.deepEqual(out[2], [['Mother Fang', 'Cliff Lurker', 'Mist Creeper'], 'Mother Fang']);
+	assert.deepEqual(out[3][0], ['Giant Webwood Spider', 'Mother Fang', 'Cliff Lurker'], 'the name with a line break is passed over');
+	assert.ok(!out[3][1].includes('/run X()'), 'and never reaches the macro');
+	assert.deepEqual(out[4], ['Webwood Lurker']);
 });
 
 test('step key: one binding does the step\'s next action, the NPC, the quest item, the mobs or the Hearthstone, in guide order', () => {
@@ -276,17 +360,17 @@ test('step key: one binding does the step\'s next action, the NPC, the quest ite
 		emit(now())
 		emit(s:IsShown())
 	`);
-	assert.deepEqual(out[0], ['macro', '/targetexact Marshal McBride']);
-	assert.deepEqual(out[1], ['macro', '/targetexact Kobold Worker\n/targetexact Kobold Vermin']);
-	assert.deepEqual(out[2], ['macro', '/targetexact Kobold Vermin\n/targetexact Kobold Worker'], 'a press moves to the next name');
+	assert.deepEqual(out[0], ['macro', '/cleartarget [nocombat]\n/targetexact Marshal McBride\n/cleartarget [dead]']);
+	assert.deepEqual(out[1], ['macro', '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]\n/targetexact [noexists] Kobold Worker\n/cleartarget [dead]']);
+	assert.deepEqual(out[2], ['macro', '/cleartarget [nocombat]\n/targetexact Kobold Worker\n/cleartarget [dead]\n/targetexact [noexists] Kobold Vermin\n/cleartarget [dead]'], 'a press moves to the next name');
 	assert.deepEqual(out[3], ['item', 'item:900']);
 	assert.deepEqual(out[4], ['item', 'item:900'], 'guide order: the collect has no mobs to target');
 	assert.deepEqual(out[5], ['item', 'item:6948']);
 	assert.deepEqual(out[6], ['item', 'item:901']);
 	assert.deepEqual(out[7], ['nil', 'nil']);
-	assert.deepEqual(out[8], ['macro', '/targetexact Murloc']);
-	assert.deepEqual(out[9], ['macro', '/targetexact Murloc'], 'no change in combat');
-	assert.deepEqual(out[10], ['macro', '/targetexact Marshal Dughan']);
+	assert.deepEqual(out[8], ['macro', '/cleartarget [nocombat]\n/targetexact Murloc\n/cleartarget [dead]']);
+	assert.deepEqual(out[9], ['macro', '/cleartarget [nocombat]\n/targetexact Murloc\n/cleartarget [dead]'], 'no change in combat');
+	assert.deepEqual(out[10], ['macro', '/cleartarget [nocombat]\n/targetexact Marshal Dughan\n/cleartarget [dead]']);
 	assert.equal(out[11], false, 'a key only: no button on screen');
 });
 
@@ -310,11 +394,73 @@ test('step key: the route\'s own goals come before optional ones, and an NPC nam
 		q.step({ { t = "talk", npc = 241, npcName = "Marshal\\tDughan" } })
 		emit(now())
 	`);
-	assert.deepEqual(out[0], ['macro', '/targetexact Kobold Vermin'], 'an optional accept does not take the key');
-	assert.deepEqual(out[1], ['macro', '/targetexact Marshal Dughan']);
-	assert.deepEqual(out[2], ['macro', '/targetexact Marshal McBride'], 'optional goals still count once the route\'s are done');
-	assert.deepEqual(out[3], ['macro', '/targetexact Kobold Vermin'], 'the unsafe NPC goal is passed over');
+	assert.deepEqual(out[0], ['macro', '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]'], 'an optional accept does not take the key');
+	assert.deepEqual(out[1], ['macro', '/cleartarget [nocombat]\n/targetexact Marshal Dughan\n/cleartarget [dead]']);
+	assert.deepEqual(out[2], ['macro', '/cleartarget [nocombat]\n/targetexact Marshal McBride\n/cleartarget [dead]'], 'optional goals still count once the route\'s are done');
+	assert.deepEqual(out[3], ['macro', '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]'], 'the unsafe NPC goal is passed over');
 	assert.deepEqual(out[4], ['nil', 'nil'], 'a tab is a control character too: no macro');
+});
+
+test('mark target: off by default; on, the target button and step key put a skull on a live hostile mob and a star on an NPC, friendly or neutral, never take one off, and clear the target only out of combat', () => {
+	const out = run(`
+		local t, s = PolestarTargetButton, PolestarStepButton
+		q.step({ { t = "kill", target = "Kobold Vermin", quest = 7, oi = 1 } })
+		emit({ t:GetAttribute("macrotext"), s:GetAttribute("macrotext") })
+		set("markTarget", true)
+		emit({ t:GetAttribute("macrotext"), s:GetAttribute("macrotext") })
+		q.step({ { t = "turnin", quest = 9, npc = 240, npcName = "Marshal Dughan" } })
+		emit(s:GetAttribute("macrotext"))
+		set("markTarget", false)
+		emit(s:GetAttribute("macrotext"))
+		local long = {}
+		for i = 1, 5 do long[i] = string.rep("N", 50) .. i end
+		emit(Polestar.QoL.Buttons.TargetMacro(long, 1, "/tm [@target,harm,nodead] !8"))
+	`);
+	const plain = (name) => `/cleartarget [nocombat]\n/targetexact ${name}\n/cleartarget [dead]`;
+	assert.deepEqual(out[0], [plain('Kobold Vermin'), plain('Kobold Vermin')], 'off by default');
+	// Cleared first: when no name is in range, nothing is left targeted to mark.
+	// Not in a fight, where clearing the target would stop melee and Auto Shot.
+	const skull = plain('Kobold Vermin') + '\n/tm [@target,harm,nodead] !8';
+	assert.deepEqual(out[1], [skull, skull]);
+	assert.equal(out[2], plain('Marshal Dughan') + '\n/tm [@target,exists,nodead,nocombat][@target,noharm,nodead] !1');
+	assert.equal(out[3], plain('Marshal Dughan'), 'turned off again');
+	assert.ok(out[4].length <= 255, 'fits a macro');
+	assert.ok(out[4].startsWith(`/cleartarget [nocombat]\n/targetexact ${'N'.repeat(50)}1\n`), 'the preferred name stays first when names are dropped');
+	assert.ok(out[4].endsWith('\n/cleartarget [dead]\n/tm [@target,harm,nodead] !8'), 'and the mark stays last');
+});
+
+test('mark target: the icon for mobs and for NPCs is a setting; a new one each press skips the other\'s and leaves a marked NPC as it is', () => {
+	const out = run(`
+		local t, s = PolestarTargetButton, PolestarStepButton
+		set("markTarget", true)
+		set("markMob", "7")
+		q.step({ { t = "kill", target = "Kobold Vermin", quest = 7, oi = 1 } })
+		emit(t:GetAttribute("macrotext"))
+		set("markNpc", "cycle")
+		q.step({ { t = "turnin", quest = 9, npc = 240, npcName = "Marshal Dughan" } })
+		local seen = {}
+		for i = 1, 8 do
+			seen[i] = s:GetAttribute("macrotext"):match("[~!]%d$")
+			q.click(s, true)
+			q.click(s, false)
+		end
+		emit(seen)
+		set("markMob", "cycle")
+		q.step({ { t = "kill", target = "Kobold Vermin", quest = 7, oi = 1 } })
+		q.click(t, false)
+		emit({ t:GetAttribute("macrotext"):match("[~!]%d$"), s:GetAttribute("macrotext"):match("[~!]%d$") })
+		-- both cycle: the next NPC gets the next icon, not the mob's
+		q.step({ { t = "turnin", quest = 9, npc = 240, npcName = "Marshal Dughan" } })
+		emit(s:GetAttribute("macrotext"):match("[~!]%d$"))
+		set("markNpc", "bogus")
+		q.step({ { t = "turnin", quest = 9, npc = 240, npcName = "Marshal Dughan" } })
+		emit(s:GetAttribute("macrotext"))
+	`);
+	assert.equal(out[0], '/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]\n/tm [@target,harm,nodead] !7');
+	assert.deepEqual(out[1], ['~1', '~2', '~3', '~4', '~5', '~6', '~8', '~1'], 'cycles, skipping the mobs\' icon');
+	assert.deepEqual(out[2], ['~2', '~2'], 'the target button and the step key share the cycle');
+	assert.equal(out[3], '~2', 'one count for both kinds: the NPC press after the mob\'s goes on from it');
+	assert.equal(out[4], '/cleartarget [nocombat]\n/targetexact Marshal Dughan\n/cleartarget [dead]\n/tm [@target,exists,nodead,nocombat][@target,noharm,nodead] !1', 'an unknown setting falls back to the star');
 });
 
 // Every CLICK binding in Bindings.xml shows its label in the key bindings
@@ -362,8 +508,128 @@ test('target button: a name with a line break or other control character never r
 		emit(Polestar.QoL.Buttons.TargetMacro({ "Kobold Laborer", "Bad\\n/run X()" }, 2))
 	`);
 	assert.deepEqual(out[0], ['nil', false], 'only unsafe names: no macro, no button');
-	assert.equal(out[1], '/targetexact Kobold Laborer');
-	assert.equal(out[2], '/targetexact Kobold Laborer', 'TargetMacro itself drops an unsafe name');
+	assert.equal(out[1], '/cleartarget [nocombat]\n/targetexact Kobold Laborer\n/cleartarget [dead]');
+	assert.equal(out[2], '/cleartarget [nocombat]\n/targetexact Kobold Laborer\n/cleartarget [dead]', 'TargetMacro itself drops an unsafe name');
+});
+
+// Plays a target macro the way the client does: /targetexact takes the
+// nearest unit with the name, alive or dead, and keeps the target when none
+// matches; [dead], [noharm], [noexists] and [nocombat] test the current
+// target and the fight, and the line runs when any bracket holds.
+function playMacro(text, units, target = null, combat = false) {
+	const holds = (cond) => cond === 'dead' ? !!(target && target.dead)
+		: cond === 'noharm' ? !!(target && !target.harm)
+		: cond === 'noexists' ? !target
+		: cond === 'nocombat' ? !combat
+		: assert.fail('unknown condition ' + cond);
+	for (const line of text.split('\n')) {
+		const m = line.match(/^(\/\w+)((?:\s*\[[^\]]*\])*)\s*(.*)$/);
+		const conds = [...m[2].matchAll(/\[([^\]]*)\]/g)].map((c) => c[1]);
+		if (conds.length && !conds.some(holds)) continue;
+		if (m[1] === '/cleartarget') target = null;
+		else if (m[1] === '/targetexact') target = units.filter((u) => u.name === m[3]).sort((a, b) => a.yd - b.yd)[0] || target;
+		else assert.fail('unexpected command ' + line);
+	}
+	return target && (target.name + (target.dead ? ' (dead)' : ''));
+}
+
+test('target button: a corpse is never left selected; the first living match wins, the preferred name first (#355)', () => {
+	const [two, one, long] = run(`
+		local B = Polestar.QoL.Buttons
+		emit(B.TargetMacro({ "Nightsaber", "Feral Nightsaber" }, 2))
+		emit(B.TargetMacro({ "Webwood Lurker" }, 1))
+		emit(B.TargetMacro({ "Defias Pathstalker", "Defias Highwayman", "Defias Pillager", "Defias Looter", "Defias Smuggler" }, 1))
+	`);
+	const corpse = { name: 'Nightsaber', dead: true, harm: true, yd: 3 };
+	const living = { name: 'Nightsaber', dead: false, harm: true, yd: 30 };
+	const feral = { name: 'Feral Nightsaber', dead: false, harm: true, yd: 40 };
+	const feralCorpse = { name: 'Feral Nightsaber', dead: true, harm: true, yd: 2 };
+	const giver = { name: 'Tarindrella', dead: false, harm: false, yd: 1 };
+	const lurker = { name: 'Webwood Lurker', dead: true, harm: true, yd: 5 };
+	const ursa = { name: 'Gnarlpine Ursa', dead: false, harm: true, yd: 10 };
+
+	// The report: the preferred name absent, a Nightsaber corpse nearest.
+	assert.equal(playMacro(two, [corpse]), null, 'only a corpse: nothing selected');
+	assert.equal(playMacro(two, [corpse, living]), null, 'the nearest Nightsaber is the corpse, so /targetexact cannot reach the living one');
+	assert.equal(playMacro(two, [corpse, feral]), 'Feral Nightsaber');
+	assert.equal(playMacro(two, [feralCorpse, corpse, living]), null);
+	assert.equal(playMacro(two, [feralCorpse, feral, corpse]), null, 'a nearer corpse of every name: nothing');
+	assert.equal(playMacro(two, [feral, living]), 'Feral Nightsaber', 'the preferred name wins when it is alive');
+	assert.equal(playMacro(two, [feralCorpse, { ...living, yd: 1 }]), 'Nightsaber', 'a preferred corpse falls through to the next name');
+	assert.equal(playMacro(two, [living], giver), 'Nightsaber', 'a friendly target does not stop the later names');
+
+	// Out of combat the press starts from nothing, so a target of none of the
+	// names -- one clicked by hand, an add -- cannot stop the later names.
+	assert.equal(playMacro(two, [living], ursa), 'Nightsaber', 'a living hostile target of another name is cleared, so the chain reaches the second name');
+	assert.equal(playMacro(two, [], ursa), null, 'no match out of combat: the old target goes too');
+
+	// In a fight the target is left alone: clearing it cuts melee swings and
+	// Auto Shot, and retargeting does not restart them.
+	assert.equal(playMacro(two, [], ursa, true), 'Gnarlpine Ursa', 'in combat, no match: the target is kept');
+	assert.equal(playMacro(two, [living], ursa, true), 'Gnarlpine Ursa', 'in combat a target of another name is kept, swings intact');
+	assert.equal(playMacro(two, [feral, living], ursa, true), 'Feral Nightsaber', 'in combat the preferred name still wins when it is there');
+	assert.equal(playMacro(two, [corpse], { ...corpse, yd: 1 }, true), null, 'in combat a corpse is still cleared');
+
+	// One name (also the step key's NPC): a corpse is cleared, and out of
+	// combat so is a target the name never matched.
+	assert.equal(playMacro(one, [lurker]), null);
+	assert.equal(playMacro(one, [], giver), null);
+	assert.equal(playMacro(one, [], giver, true), 'Tarindrella', 'in combat the target is kept');
+	assert.equal(playMacro(one, [giver].map((u) => ({ ...u, name: 'Webwood Lurker' }))), 'Webwood Lurker', 'a friendly match is kept');
+
+	// Past the macro limit the last names in click order go; the preferred one stays first.
+	assert.ok(long.length <= 255, long.length + ' characters');
+	assert.match(long, /^\/cleartarget \[nocombat\]\n\/targetexact Defias Pathstalker\n\/cleartarget \[dead\]\n\/targetexact \[noexists\] Defias Highwayman\n/);
+	assert.doesNotMatch(long, /Defias Smuggler/);
+});
+
+test('rare button: targets the rares in range, comes up and goes with them, each click cycles, off with its setting', () => {
+	const out = run(`
+		local b = PolestarRareButton
+		local nearby = {}
+		Polestar.Rares = { Nearby = function() return nearby end }
+		q.step({ { t = "kill", target = "Wolf" } })
+		emit({ b:GetAttribute("macrotext") or "nil", b:IsShown() })
+		nearby = { "Thuros Lightfingers", "Bad\\n/run X()", "Hogger" }
+		Polestar.Fire("RARE_NEARBY")
+		stub.runTimers()
+		emit({ b:GetAttribute("type"), b:GetAttribute("macrotext"), b:IsShown(), b.Label:GetText(), PolestarTargetButton:GetAttribute("macrotext") })
+		q.click(b, false)
+		emit(b:GetAttribute("macrotext"))
+		q.combat(true)
+		nearby = { "Hogger" }
+		Polestar.Fire("RARE_NEARBY")
+		stub.runTimers()
+		emit({ b:GetAttribute("macrotext"), b:IsShown() })
+		q.combat(false)
+		emit({ b:GetAttribute("macrotext"), b:IsShown() })
+		set("rareButton", false)
+		emit({ b:GetAttribute("macrotext") or "nil", b:IsShown() })
+		set("rareButton", true)
+		nearby = {}
+		Polestar.Fire("RARE_NEARBY")
+		stub.runTimers()
+		emit({ b:GetAttribute("macrotext") or "nil", b:IsShown() })
+	`);
+	assert.deepEqual(out[0], ['nil', false]);
+	// #373's macro: from nothing out of combat, the preferred name first, corpses passed over.
+	const macro = (...names) => ['/cleartarget [nocombat]', ...names.flatMap((n, i) => [`/targetexact ${i ? '[noexists] ' : ''}${n}`, '/cleartarget [dead]'])].join('\n');
+	assert.deepEqual(out[1], ['macro', macro('Thuros Lightfingers', 'Hogger'), true, 'Thuros Lightfingers', macro('Wolf')]);
+	assert.equal(out[2], macro('Hogger', 'Thuros Lightfingers'), 'the next click moves on');
+	assert.deepEqual(out[3], [macro('Hogger', 'Thuros Lightfingers'), true], 'in combat the button keeps what it did');
+	assert.deepEqual(out[4], [macro('Hogger'), true]);
+	assert.deepEqual(out[5], ['nil', false]);
+	assert.deepEqual(out[6], ['nil', false]);
+});
+
+test('rare button: its icon is gold, apart from the red Target button', () => {
+	const [rare, target, gold] = run(`
+		emit({ PolestarRareButton.Icon:GetVertexColor() })
+		emit({ PolestarTargetButton.Icon:GetVertexColor() })
+		emit({ Polestar.Theme.Color("quest") })
+	`);
+	assert.deepEqual(rare.slice(0, 3), gold.slice(0, 3), 'the quest gold');
+	assert.notDeepEqual(rare.slice(0, 3), target.slice(0, 3), 'not the Target button color');
 });
 
 test('hearth: button while a hearth goal is open; GetHearth reports bind and cooldown', () => {

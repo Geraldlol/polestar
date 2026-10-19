@@ -1042,6 +1042,110 @@ test('a step that hearths and then flies completes when the flight lands: the he
 	assert.deepEqual(out, { atInn: [1, 'done', 'active'], landed: 2 });
 });
 
+// #362: Body and Heart's Darkshore leg, `fly Auberdine` -> work outside the
+// town; Goldshire stands in for Auberdine.
+const LANDED = `
+	Polestar.RegisterGuide({ id = "test/landed", pack = "test", title = "Landed", minLevel = 1, maxLevel = 10, steps = {
+		{ goals = {
+			{ t = "fly", location = "Goldshire", npc = 352, npcName = "Dungar Longdrink", map = 1453, x = 66, y = 62 },
+			{ t = "kill", target = "Kobold Vermin", npc = 6, count = 10, quest = 7, oi = 1, map = 1429, x = 47.6, y = 35.1 },
+		} },
+		{ goals = { { t = "level", level = 99 } } },
+	} })
+`;
+
+test('a flight that landed stays done when the player walks out of the town, and across a reload, while the step goes on (#362)', () => {
+	const [first] = run({
+		guides: LANDED,
+		before: 'w.onQuest(7, { { required = 10, fulfilled = 0 } }); w.setZone("Stormwind City", "Trade District")',
+		script: `
+			local w = stub.world
+			E.SetGuide("test/landed"); flush()
+			local function state() return { E.GetStepIndex(), E.GetStepView(1).goals[1].status, E.GetWaypoint().goalIndex } end
+			local r = { before = state() }
+			w.setZone("Elwynn Forest", "Goldshire"); flush()
+			r.landed = state()
+			w.setZone("Elwynn Forest", ""); flush()
+			r.left = state()
+			emit(r)
+		`,
+	});
+	assert.deepEqual(first, { before: [1, 'active', 1], landed: [1, 'done', 2], left: [1, 'done', 2] });
+
+	const [reloaded] = run({
+		guides: LANDED,
+		before: 'w.onQuest(7, { { required = 10, fulfilled = 3 } }); w.setZone("Elwynn Forest", "")',
+		saved: { Polestar: 'PolestarCharDB = { schema = 1, tabs = { "test/landed" }, activeTab = 1, manual = { ["test/landed"] = { ["1:1"] = true } } }' },
+		script: `emit({ E.GetStepIndex(), E.GetStepView(1).goals[1].status, E.GetWaypoint().goalIndex })`,
+	});
+	assert.deepEqual(reloaded, [1, 'done', 2]);
+});
+
+test('a flight looked at ahead while standing at its end is not latched (#362)', () => {
+	const [out] = run({
+		guides: `
+			Polestar.RegisterGuide({ id = "test/ahead", pack = "test", title = "Ahead", minLevel = 1, maxLevel = 10, steps = {
+				{ goals = { { t = "kill", target = "Kobold Vermin", npc = 6, count = 10, quest = 7, oi = 1, map = 1429, x = 47.6, y = 35.1 } } },
+				{ goals = { { t = "fly", location = "Goldshire" }, { t = "level", level = 99 } } },
+			} })
+		`,
+		before: 'w.onQuest(7, { { required = 10, fulfilled = 0 } }); w.setZone("Elwynn Forest", "Goldshire")',
+		script: `
+			E.SetGuide("test/ahead"); flush()
+			E.Goto(2); flush()
+			local looked = { E.GetStepIndex(), E.GetStepView(2).goals[1].status }
+			stub.world.setZone("Elwynn Forest", ""); flush()
+			emit({ looked = looked, latches = PolestarCharDB.manual["test/ahead"] or {} })
+		`,
+	});
+	assert.deepEqual(out, { looked: [2, 'done'], latches: {} });
+});
+
+test('a hearth that landed stays done when the player walks out of the inn\'s town while the step goes on (#362)', () => {
+	const [out] = run({
+		guides: `
+			Polestar.RegisterGuide({ id = "test/hearthed", pack = "test", title = "Hearthed", minLevel = 1, maxLevel = 10, steps = {
+				{ goals = {
+					{ t = "hearth", location = "Goldshire" },
+					{ t = "kill", target = "Kobold Vermin", npc = 6, count = 10, quest = 7, oi = 1, map = 1429, x = 47.6, y = 35.1 },
+				} },
+				{ goals = { { t = "level", level = 99 } } },
+			} })
+		`,
+		before: 'w.onQuest(7, { { required = 10, fulfilled = 0 } }); w.setZone("Stormwind City", "Trade District")',
+		script: `
+			local w = stub.world
+			E.SetGuide("test/hearthed"); flush()
+			local function state() return { E.GetStepIndex(), E.GetStepView(1).goals[1].status, E.GetWaypoint().goalIndex } end
+			local r = { before = state() }
+			w.setZone("Elwynn Forest", "Goldshire"); flush()
+			r.landed = state()
+			w.setZone("Elwynn Forest", ""); flush()
+			r.left = state()
+			emit(r)
+		`,
+	});
+	assert.deepEqual(out, { before: [1, 'active', 2], landed: [1, 'done', 2], left: [1, 'done', 2] });
+});
+
+test('a flight that lands while the player looks ahead at another step still counts for its own step (#362)', () => {
+	const [out] = run({
+		guides: LANDED,
+		before: 'w.onQuest(7, { { required = 10, fulfilled = 0 } }); w.setZone("Stormwind City", "Trade District")',
+		script: `
+			local w = stub.world
+			E.SetGuide("test/landed"); flush()
+			E.Goto(2); flush()
+			w.setZone("Elwynn Forest", "Goldshire"); flush()
+			w.setZone("Elwynn Forest", ""); flush()
+			local ahead = { E.GetStepIndex(), E.GetStepView(1).goals[1].status }
+			E.Goto(1); flush()
+			emit({ ahead = ahead, back = { E.GetStepIndex(), E.GetStepView(1).goals[1].status, E.GetWaypoint().goalIndex } })
+		`,
+	});
+	assert.deepEqual(out, { ahead: [2, 'done'], back: [1, 'done', 2] });
+});
+
 test('bursts of quest events are coalesced to at most 10 evaluations per second', () => {
 	const [out] = run({
 		script: `

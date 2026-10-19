@@ -67,13 +67,41 @@ test('collect positions at the item drop sources, preferring the current zone, t
 	// spawns make the spawn areas: a pack of two and, with only three spawns, the
 	// lone one too; nearest to the goal's point first.
 	// The dominant source (50% or more) is named, for quest objectives too.
+	// `fromNpcs` names both droppers for the target button, the one the point
+	// belongs to first.
 	const pack = { x: 45.5, y: 39, r: 30, n: 2 };
 	const lone = { x: 44, y: 45, r: 15, n: 1 };
+	const timber = { npc: 69, npcName: 'Timber Wolf' };
+	const young = { npc: 299, npcName: 'Diseased Young Wolf' };
 	const alone = goalsOf(['step One', '  collect 750 x4']).goals[0];
-	assert.deepEqual(alone, { t: 'collect', item: 750, itemName: 'Tough Wolf Meat', from: 'Timber Wolf', fromId: 69, fromKind: 'npc', fromFaction: 'A', count: 4, map: 1429, x: 44.5, y: 42.5, f: 'e', spots: [lone, pack] });
+	assert.deepEqual(alone, { t: 'collect', item: 750, itemName: 'Tough Wolf Meat', from: 'Timber Wolf', fromId: 69, fromKind: 'npc', fromFaction: 'A', count: 4, map: 1429, x: 44.5, y: 42.5, f: 'e', spots: [lone, pack], fromNpcs: [timber, young] });
 	// After meeting Eagan (48.94,40.17) the nearest spawn of any source wins: a Young Wolf at 46,38.
 	const linked = goalsOf(['step One', '  accept 33', '  collect 750 quest 33']).goals[1];
-	assert.deepEqual(linked, { t: 'collect', quest: 33, title: 'Wolves Across the Border', item: 750, itemName: 'Tough Wolf Meat', from: 'Timber Wolf', fromId: 69, fromKind: 'npc', fromFaction: 'A', count: 8, oi: 1, map: 1429, x: 46, y: 38, f: 'e', spots: [pack, lone] });
+	assert.deepEqual(linked, { t: 'collect', quest: 33, title: 'Wolves Across the Border', item: 750, itemName: 'Tough Wolf Meat', from: 'Timber Wolf', fromId: 69, fromKind: 'npc', fromFaction: 'A', count: 8, oi: 1, map: 1429, x: 46, y: 38, f: 'e', spots: [pack, lone], fromNpcs: [young, timber] });
+});
+
+test('a collect names the sources its point and spawn areas belong to (fromNpcs), the point\'s own first, for the target button', () => {
+	// Tough Wolf Meat drops from Timber Wolf (80%) and Diseased Young Wolf (40%);
+	// both spawn on Elwynn, so both are the mobs the arrow leads to.
+	const alone = goalsOf(['step One', '  collect 750 x4']).goals[0];
+	assert.deepEqual(alone.fromNpcs, [{ npc: 69, npcName: 'Timber Wolf' }, { npc: 299, npcName: 'Diseased Young Wolf' }]);
+	// The point's own source comes first, whatever its drop chance: from Eagan the
+	// nearest spawn is a Diseased Young Wolf's.
+	const linked = goalsOf(['step One', '  accept 33', '  collect 750 quest 33']).goals[1];
+	assert.deepEqual(linked.fromNpcs, [{ npc: 299, npcName: 'Diseased Young Wolf' }, { npc: 69, npcName: 'Timber Wolf' }]);
+	// Hand-placed coordinates name the sources standing by the point, the one it
+	// belongs to first, whatever its drop chance: on the Timber Wolf pack the
+	// Timber Wolf leads, on the Diseased Young Wolf's own spawn it does.
+	const placed = goalsOf(['step One', '  collect 750 x4 @45.5,39']).goals[0];
+	assert.deepEqual(placed.fromNpcs, [{ npc: 69, npcName: 'Timber Wolf' }, { npc: 299, npcName: 'Diseased Young Wolf' }]);
+	const onYoung = goalsOf(['step One', '  collect 750 x4 @46,38']).goals[0];
+	assert.deepEqual(onYoung.fromNpcs, [{ npc: 299, npcName: 'Diseased Young Wolf' }, { npc: 69, npcName: 'Timber Wolf' }]);
+	// A source that spawns nowhere near the point is not one of its mobs: from
+	// the southern Timber Wolves the Young Wolf's only spawn is 300 yd away.
+	const south = goalsOf(['step One', '  collect 750 x4 @43,50']).goals[0];
+	assert.deepEqual(south.fromNpcs, [{ npc: 69, npcName: 'Timber Wolf' }]);
+	// Only a `collect` carries them: a kill goal already names its target.
+	assert.equal(goalsOf(['step One', '  kill 6']).goals[0].fromNpcs, undefined);
 });
 
 test('a second source dropping the item at 50% or more is named beside the first; both carry their ids (the names in the client\'s language)', () => {

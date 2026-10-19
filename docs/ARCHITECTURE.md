@@ -186,7 +186,11 @@ during their step, and conditions that can stop holding later (goto,
 sethome, hearth, fly, getfp, buy, bag-count collect, `train class` with
 nothing to learn) are latched once the route moves past their step, so
 leaving a zone, rebinding the hearthstone or levelling up never drags the
-guide backwards. Quest goals are never latched, but for a `direct` turn-in's
+guide backwards. A hearth or fly that landed is also latched within its step
+while that step is the live one, even while the player looks at another
+step, so walking out of the arrival's subzone does not send the player back
+to the flight master (#362); a step only looked at ahead never latches it,
+and stepping back (Prev) keeps it. Quest goals are never latched, but for a `direct` turn-in's
 QUEST_TURNED_IN during its step (a repeatable is never flagged completed): abandoning a
 quest reopens its step (unless the player ticked it). `skipped` holds the
 steps the player skipped (step number) and the optional goals they skipped
@@ -823,9 +827,9 @@ as on a bag item (`W.ItemClick`: Shift links, Ctrl tries it on, Alt guides;
 | `interact` | `object`, `objName` | `quest`, `oi` | objective state if `quest` (the line named after the object, else `oi`); else manual |
 | `use` | `item`, `itemName` | `quest`, `oi` | objective state if `quest`; else manual |
 | `sethome` | `location` | `npc`, `npcName`, `area` | bound at the goal's inn (`npc`'s, else the inn `location` names, in Nav/Travel.lua's data), by any of: the inn Travel finds for `GetBindLocation()` (`Nav.BoundInn`: the innkeeper learned at bind time in `flags.inn`, else the inn whose `area` the client names so, else its names); `GetBindLocation()` equal to the client's name of that inn's or the goal's `area` (`Compat.GetAreaName`); last, equal to `location` (case-insensitive). Binding at that innkeeper during the step latches it |
-| `hearth` | `location` | `area` | zone or subzone equals the client's name of `area` (without one, `location`), else manual |
+| `hearth` | `location` | `area` | zone or subzone equals the client's name of `area` (without one, `location`), else manual; latched once it lands in its live step |
 | `getfp` | `location` | `npc`, `npcName`, `node`, `area` | with `node`: that taxi node among the known ones (`flags.taxi`, recorded by Nav/Travel.lua from the flight map); without: taxi map opened at a flight master of that name (persisted in `flags.fp`); else manual |
-| `fly` | `location` | `area`, `node` | as `hearth` (`node`: the flight point, named in the client's language where no `area` names the place) |
+| `fly` | `location` | `area`, `node` | as `hearth`, including the in-step latch (`node`: the flight point, named in the client's language where no `area` names the place) |
 | `train` | — | `npc`, `npcName`, `text` | trainer window opened during this step, else manual |
 | `buy` | `item`, `itemName` | `count`, `npc`, `npcName` | item count ≥ `count` (default 1) |
 | `vendor` | — | `npc`, `npcName`, `text` | merchant window opened during this step, else manual |

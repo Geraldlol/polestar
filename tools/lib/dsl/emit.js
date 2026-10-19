@@ -16,11 +16,13 @@ const GOAL_KEYS = [
 	't', 'class', 'spell', 'spellName', 'faction', 'factionName', 'standing', 'achievement', 'achievementName', 'criteria',
 	'quest', 'title', 'target', 'npc', 'npcName', 'object', 'objName', 'item', 'itemName', 'count', 'oi', 'skill', 'skillLine', 'rank', 'rankMax', 'level', 'untilSkill',
 	'reagents', 'location', 'minLevel', 'qlvl', 'pre', 'preAll', 'closedBy', 'preTitles', 'text', 'node', 'area', 'map', 'x', 'y', 'z', 'f', 'r', 'spots', 'spread', 'optional', 'only', 'profLine', 'profName', 'profRank', 'note',
-	'from', 'fromKind', 'fromRank', 'fromFaction', 'fromAlso', 'fromId', 'fromAlsoId', 'candidates', 'rewards', 'group', 'direct',
+	'from', 'fromKind', 'fromRank', 'fromFaction', 'fromAlso', 'fromId', 'fromAlsoId', 'fromNpcs', 'candidates', 'rewards', 'group', 'direct',
 ];
 const REAGENT_KEYS = ['item', 'itemName', 'count'];
 // `z` (heights.js) follows y in candidates and spawn areas as in goals.
 const CANDIDATE_KEYS = ['npc', 'npcName', 'map', 'x', 'y', 'z', 'f', 'faction', 'races', 'classes', 'lvl', 'rate', 'spawns'];
+// A collect's `fromNpcs`: the creatures its point and spawn areas belong to.
+const SOURCE_NPC_KEYS = ['npc', 'npcName'];
 // Spawn areas: map-percent centre in the goal's map and frame, its height,
 // radius in yards, spawn count, and `alt` for a place the arrow reaches only
 // when moved on to it.
@@ -31,7 +33,7 @@ const REWARD_KEYS = ['item', 'itemName', 'quality'];
 const GUIDE_REWARD_KEYS = ['item', 'itemName', 'quality', 'choice', 'spell', 'spellName', 'text'];
 // Farm-spot rates (items per kill) need three decimals; coordinates are already rounded to two.
 const LIST_DECIMALS = { candidates: 3 };
-const LIST_KEYS = { reagents: REAGENT_KEYS, candidates: CANDIDATE_KEYS, spots: SPOT_KEYS, items: REWARD_KEYS, choices: REWARD_KEYS, reward: GUIDE_REWARD_KEYS };
+const LIST_KEYS = { reagents: REAGENT_KEYS, candidates: CANDIDATE_KEYS, fromNpcs: SOURCE_NPC_KEYS, spots: SPOT_KEYS, items: REWARD_KEYS, choices: REWARD_KEYS, reward: GUIDE_REWARD_KEYS };
 const ONLY_KEYS = ['classes', 'races', 'factions'];
 // RegisterPack's keys in order (`addon` and `format` are written by the compiler).
 const PACK_KEYS = ['id', 'title', 'author', 'version', 'license', 'website', 'source', 'notes'];

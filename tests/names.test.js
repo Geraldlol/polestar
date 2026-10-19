@@ -291,8 +291,8 @@ emit(out)`;
 test('the target button\'s macro targets the French name; an English client\'s the English one', () => {
 	const script = 'local B = Polestar.QoL.Buttons; emit(B.TargetMacro(B.TargetNames(), 1))';
 	const before = 'stub.world.accept(7, { { text = "Kobold Vermin slain: 0/10", required = 10 }, { text = "Handful of Oats: 0/8", required = 8 } })';
-	assert.deepEqual(run({ guide: true, before, script }), ['/targetexact Vermine kobold']);
-	assert.deepEqual(run({ locale: null, guide: true, before, script }), ['/targetexact Kobold Vermin']);
+	assert.deepEqual(run({ guide: true, before, script }), ['/cleartarget [nocombat]\n/targetexact Vermine kobold\n/cleartarget [dead]']);
+	assert.deepEqual(run({ locale: null, guide: true, before, script }), ['/cleartarget [nocombat]\n/targetexact Kobold Vermin\n/cleartarget [dead]']);
 });
 
 const fs = require('node:fs');
