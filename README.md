@@ -23,7 +23,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="Licence: GPL-3.0" src="https://img.shields.io/badge/licence-GPL--3.0-e6ba66?style=flat-square&labelColor=232a3f"></a>
   <img alt="World of Warcraft: Forever, client 1.60.1" src="https://img.shields.io/badge/WoW-Forever_1.60.1-94c9ff?style=flat-square&labelColor=232a3f">
-  <img alt="Version 0.2.5, beta" src="https://img.shields.io/badge/version-0.2.5_beta-fabf4d?style=flat-square&labelColor=232a3f">
+  <img alt="Version 0.2.6, beta" src="https://img.shields.io/badge/version-0.2.6_beta-fabf4d?style=flat-square&labelColor=232a3f">
   <a href="https://github.com/fitzforge/polestar/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/fitzforge/polestar/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://discord.gg/vMbee6F2e9"><img alt="Discord: join the Polestar community" src="https://img.shields.io/badge/Discord-join_us-5865f2?style=flat-square&logo=discord&logoColor=white&labelColor=232a3f"></a>
   <a href="https://www.curseforge.com/wow/addons/polestar-guides"><img alt="CurseForge: Polestar Guides" src="https://img.shields.io/badge/CurseForge-Polestar_Guides-f16436?style=flat-square&logo=curseforge&logoColor=white&labelColor=232a3f"></a>
@@ -89,28 +89,31 @@ Good to know:
   separate addon from its own author: see
   [Community guides](#community-guides).
 - Something wrong? Click the bug in the guide window, beside Skip: say what
-  went wrong, copy the report (it already holds the step, where you stand and
-  the versions) and paste it on the
-  [Polestar Discord](https://discord.gg/vMbee6F2e9). `/polestar report` opens
-  it too, and [issues](https://github.com/fitzforge/polestar/issues) are
-  welcome as well. The release's `SHA256SUMS` holds the zips' checksums.
+  went wrong; the report already holds the step, where you stand, your other
+  addons and the versions. **Copy report** and post it in **#bugs** on the
+  [Polestar Discord](https://discord.gg/vMbee6F2e9) — a bot files it for the
+  developers and replies in your thread when it's fixed. **Get the invite** is
+  there if you're not in the Discord yet. Have a GitHub account?
+  **Open on GitHub** pre-fills a new issue with your report. `/polestar report`
+  opens the window too, and [issues](https://github.com/fitzforge/polestar/issues)
+  are welcome as well. The release's `SHA256SUMS` holds the zips' checksums.
 
 ## What it is
 
-Polestar is one addon for the whole of WoW: Forever. It carries 220 guides:
+Polestar is one addon for the whole of WoW: Forever. It carries 222 guides:
 57 leveling guides that take both factions from 1 to 60 from every race's
 starting zone (Zephras Isle for the Skyborne included), 62 class guides for
 every class's quest chains, the twelve professions from 1 to 300, 17
-reputations, 7 exploration guides, the Legacy challenges and 64 collectible
-guides, one per mount and per pet. Around the guides it adds a 3D waypoint
-arrow that walks real paths (on Polestar's walking maps, with a router that
-started from Shortest Path Forever's by Cillian Berragan) and a travel planner, quest
-markers on the map, an upgrade indicator on item tooltips, a search for where
-any item, mount or pet comes from, a dungeon quest journal, rare alerts and
-the quality-of-life helpers a long leveling session needs. Its interface and
-its guides read in English, German, French, Spanish (Spain and Latin
-America), Brazilian Portuguese, Russian, Korean and Chinese (simplified and
-traditional).
+reputations, 7 exploration guides, the Legacy challenges, 64 collectible
+guides (one per mount and per pet) and 2 miscellaneous guides. Around the
+guides it adds a 3D waypoint arrow that walks real paths (on Polestar's
+walking maps, with a router that started from Shortest Path Forever's by
+Cillian Berragan) and a travel planner, quest markers on the map, an upgrade
+indicator on item tooltips, a search for where any item, mount or pet comes
+from, a dungeon quest journal, rare alerts and the quality-of-life helpers a
+long leveling session needs. Its interface and its guides read in English,
+German, French, Spanish (Spain and Latin America), Brazilian Portuguese,
+Russian, Korean and Chinese (simplified and traditional).
 
 The leveling routes are not hand-picked. A simulator models every quest
 Forever offers a faction, plays millions of complete 1-60 routes for each
@@ -231,6 +234,17 @@ map. Renders of every window and state, drawn without the game, are in
   trainer of your class, unless your guide is about to take you there.
 - **Elite quests are optional.** Leveling routes use only quests a player can
   do alone; a quest that needs an elite appears as an extra marked "optional".
+- **Escort notes.** On an escort quest the guide window says so under the
+  quest's accept and under the goal to complete it: "Escort: if the NPC is
+  not there, wait for it to respawn", so an empty spot means someone else is
+  on the escort, not a wrong place.
+- **Bar at the bottom** (Options, Guide, Window): puts the tabs and the step
+  bar at the bottom edge when the window grows upward, so they stay in one
+  place as steps get longer. Off by default.
+- **Hide in dungeons** (Options, Guide, Window, In dungeons; off by default):
+  the guide window hides inside dungeons and raids and comes back when you
+  leave. `/polestar`, the key binding or the minimap button still opens it
+  while you are inside.
 
 ### Navigation
 
@@ -267,6 +281,12 @@ map. Renders of every window and state, drawn without the game, are in
   settings may not work with it on. With TomTom, the arrow can follow
   TomTom's. Addon authors: `Polestar.Nav.API` (docs/ARCHITECTURE.md, "Nav
   API").
+- **Flight map destination.** On the flight map, the destination the guide
+  flies you to is marked with a bobbing arrow and its name above it, and a
+  slow ripple on the node itself. With Reduce motion on, the mark stands still.
+- **Lock arrow and buttons** (Options, Guide, Window; off by default): a stray
+  drag no longer moves the arrow, the quest item, target and Hearthstone
+  buttons or the flight and instance timers. Shift-drag still moves them.
 
 ### Pathing by Shortest Path Forever
 
@@ -321,14 +341,21 @@ guides you there instead.
 
 - **Quest markers**: givers, objectives and turn-ins on the world map and the
   minimap, with tooltip lines on the mobs and items a quest needs and quest
-  levels in the log. Nameplate icons mark the mobs you still need, beside the
-  health bar of EllesmereUI and other replacement nameplates too.
+  levels in the log. Nameplate icons mark the mobs you still need, with a
+  live kill or loot count beside the quest icon ("3/10", "3/10 · 1/8" for
+  two quests), beside the health bar of EllesmereUI and other replacement
+  nameplates too.
 - **Rare and treasure spawns, dungeon entrances, flight masters, docks and
   inns** can mark the map too. Every map icon is off by default and turns on
   under **Map** in the options; the arrow's target, its route and the
   regions the guide step's mobs and objects spawn in (shaded on the world map
   and the minimap) always show.
 - **A world map without fog of war**, with coordinates and zone level ranges.
+- **Mark what they target** (Options, Questing, Buttons; off by default): the
+  target button and the step key put a raid icon on the mob or NPC they
+  target — a skull and a star by default, configurable — leaving icons
+  already placed alone. Either can be set to "A new one each press", so the
+  last few targets keep theirs. Your party sees the icons.
 
 ### Gear advice
 
@@ -350,12 +377,16 @@ guides you there instead.
   it; Alt-click an item link for a guide.
 - **Dungeons**: a journal page per dungeon with every quest (where it starts
   and ends, its objective, chain and rewards), the bosses and the entrance.
+  A chip beside each dungeon's name shows how far its quests take you (or
+  its recommended level); hovering it shows the XP and the levels it spans.
   "Pick up the quests" builds a guide that collects every quest of the
   dungeon you can take, earlier quests first, on the shortest path from where
   you stand to the entrance; after the run, "Hand in the quests" guides you
   to where they are turned in and takes the follow-ups there.
 - **Rares**: rares and treasures by zone with their spawns and signature
   drop, and an alert when one shows up on your minimap, nameplates or target.
+  A **Rare button** appears under the Target button when Polestar spots a rare
+  nearby and targets it by name (Options, Questing, Buttons, Rare button).
 
 Lookup, Dungeons and Rares read the Codex, a data pack built on your own
 machine from addons you have installed ([Data and licensing](#data-and-licensing));
@@ -490,6 +521,7 @@ settings instead, and Polestar keeps out of the game's own windows.
 | `rares [test]` | Open Rares, or show a sample rare alert |
 | `questdb` | Quest database status |
 | `packs` | Open Options > Community guides |
+| `import` | Open the Import page: paste a shared guide string to save it without installing an addon; `import clear` or `import delete` to remove it |
 | `gamepad` | Open Options > Gamepad: button names and key bindings |
 | `welcome` | Show the welcome again |
 | `where` | Print your map and position as guide lines (`zone map <id>`, `goto x,y live`), in a box to copy |
@@ -701,6 +733,17 @@ Polestar does not ship, host or recommend any.
 A community addon never replaces Polestar's guides or another one's.
 Report problems in it to its author, not to Polestar, and install them only
 from authors you trust.
+
+### Import strings
+
+A short guide shared as a single line of text (a quest chain, an item, a
+mount, an errand) can be pasted on the **Import page** without installing
+anything: `/polestar import` opens it, or follow the foot of the hub's left
+rail above Options. Polestar shows what the guide is before saving it, says
+why when it turns one down, offers **Update** for a newer version and keeps
+your progress, and lists your imported guides with **Delete**. Imported guides
+appear in the guide menu under **Community guides > Imported**, credited to
+their author, and are never suggested on their own.
 
 ### Writing a community addon
 
