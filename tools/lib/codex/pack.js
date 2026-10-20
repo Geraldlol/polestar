@@ -224,7 +224,7 @@ function encodeSpawns(spawns) {
 }
 
 function encodeNpc(rec) {
-	const flags = `${rec.rare ? 'r' : ''}${rec.elite ? 'e' : ''}${rec.boss ? 'b' : ''}`;
+	const flags = `${rec.rare ? 'r' : ''}${rec.elite ? 'e' : ''}${rec.boss ? 'b' : ''}${rec.ghostOnly ? 'g' : ''}`;
 	const head = [num(rec.level), num(rec.levelMax), rec.faction || '', flags, esc(rec.instance), (rec.roles || []).map(esc).join(','), list(rec.loot)];
 	return [...head, ...encodeSpawns(rec.spawns)].join(';');
 }
